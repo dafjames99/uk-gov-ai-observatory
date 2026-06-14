@@ -50,3 +50,69 @@ GDS,Government Digital Service,executive_agency
 HM Land Registry,HM Land Registry,executive_agency
 Land Registry,HM Land Registry,executive_agency
 HMLR,HM Land Registry,executive_agency
+Department for Environment Food and Rural Affairs,Department for Environment Food and Rural Affairs,government_department
+"Department for Environment, Food & Rural Affairs",Department for Environment Food and Rural Affairs,government_department
+DEFRA,Department for Environment Food and Rural Affairs,government_department
+Defra,Department for Environment Food and Rural Affairs,government_department
+Ministry of Housing Communities and Local Government,Ministry of Housing Communities and Local Government,government_department
+MHCLG,Ministry of Housing Communities and Local Government,government_department
+Information Commissioner's Office,Information Commissioner's Office,arm_length_body
+ICO,Information Commissioner's Office,arm_length_body
+Driver and Vehicle Standards Agency,Driver and Vehicle Standards Agency,executive_agency
+DVSA,Driver and Vehicle Standards Agency,executive_agency
+HMT,HM Treasury,government_department
+MOD,Ministry of Defence,government_department
+Money and Pensions Service,Money and Pensions Service,arm_length_body
+MaPS,Money and Pensions Service,arm_length_body
+Care Quality Commission,Care Quality Commission,arm_length_body
+CQC,Care Quality Commission,arm_length_body
+NHS Blood & Transplant,NHS Blood & Transplant,arm_length_body
+NHS BSA,NHS Business Services Authority,arm_length_body
+NHS Business Services Authority,NHS Business Services Authority,arm_length_body
+NHSBSA,NHS Business Services Authority,arm_length_body
+National Institute for Health and Care Excellence,National Institute for Health and Care Excellence,arm_length_body
+NICE,National Institute for Health and Care Excellence,arm_length_body
+National Savings & Investments,National Savings & Investments,arm_length_body
+NS&I,National Savings & Investments,arm_length_body
+Insolvency Service,Insolvency Service,executive_agency
+The Insolvency Service,Insolvency Service,executive_agency
+Student Loans Company,Student Loans Company,arm_length_body
+SLC,Student Loans Company,arm_length_body
+Children and Family Court Advisory and Support Service,Children and Family Court Advisory and Support Service,arm_length_body
+Cafcass,Children and Family Court Advisory and Support Service,arm_length_body
+CAFCASS,Children and Family Court Advisory and Support Service,arm_length_body
+Intellectual Property Office,Intellectual Property Office,executive_agency
+IPO,Intellectual Property Office,executive_agency
+The Crown Prosecution Service,Crown Prosecution Service,arm_length_body
+Crown Prosecution Service,Crown Prosecution Service,arm_length_body
+CPS,Crown Prosecution Service,arm_length_body
+The Gambling Commission,Gambling Commission,arm_length_body
+Gambling Commission,Gambling Commission,arm_length_body
+National Highways,National Highways,arm_length_body
+Maritime and Coastguard Agency,Maritime and Coastguard Agency,executive_agency
+MCA,Maritime and Coastguard Agency,executive_agency
+Met Office,Met Office,arm_length_body
+UK Export Finance,UK Export Finance,arm_length_body
+UKEF,UK Export Finance,arm_length_body
+Valuation Office Agency,Valuation Office Agency,executive_agency
+VOA,Valuation Office Agency,executive_agency
+UK Hydrographic Office,UK Hydrographic Office,arm_length_body
+UKHO,UK Hydrographic Office,arm_length_body
+Health Research Authority,Health Research Authority,arm_length_body
+HRA,Health Research Authority,arm_length_body
+Food Standards Agency,Food Standards Agency,arm_length_body
+FSA,Food Standards Agency,arm_length_body
+Public Sector Fraud Authority,Public Sector Fraud Authority,executive_agency
+PSFA,Public Sector Fraud Authority,executive_agency
+Building Digital UK,Building Digital UK,executive_agency
+BDUK,Building Digital UK,executive_agency
+Office for Students,Office for Students,arm_length_body
+OfS,Office for Students,arm_length_body
+Salix Finance,Salix Finance,arm_length_body
+Oak National Academy,Oak National Academy,arm_length_body
+Department for Health and Social Care and NHS Digital,Department of Health and Social Care,government_department
+DSIT - Parlex,Department for Science Innovation and Technology,government_department
+DSIT - Redbox,Department for Science Innovation and Technology,government_department
+Gov.UK Data Labs (Cabinet Office),Cabinet Office,government_department
+UK Heath Security Agency,UK Health Security Agency,arm_length_body
+The Probation Service,His Majesty's Prison and Probation Service,executive_agency
