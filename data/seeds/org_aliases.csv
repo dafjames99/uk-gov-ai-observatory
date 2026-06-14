@@ -1,0 +1,52 @@
+raw_name,canonical_name,org_type
+Department for Work and Pensions,Department for Work and Pensions,government_department
+Department for Work & Pensions,Department for Work and Pensions,government_department
+DWP,Department for Work and Pensions,government_department
+DWP - Department for Work and Pensions,Department for Work and Pensions,government_department
+HM Revenue & Customs,HM Revenue & Customs,government_department
+HM Revenue and Customs,HM Revenue & Customs,government_department
+HMRC,HM Revenue & Customs,government_department
+NHS England,NHS England,arm_length_body
+NHS England and NHS Improvement,NHS England,arm_length_body
+NHSE,NHS England,arm_length_body
+Ministry of Justice,Ministry of Justice,government_department
+MoJ,Ministry of Justice,government_department
+Ministry of Justice (MoJ),Ministry of Justice,government_department
+His Majesty's Prison and Probation Service,His Majesty's Prison and Probation Service,executive_agency
+HMPPS,His Majesty's Prison and Probation Service,executive_agency
+Home Office,Home Office,government_department
+Department for Science Innovation and Technology,Department for Science Innovation and Technology,government_department
+"Department for Science, Innovation and Technology",Department for Science Innovation and Technology,government_department
+DSIT,Department for Science Innovation and Technology,government_department
+Office for National Statistics,Office for National Statistics,arm_length_body
+ONS,Office for National Statistics,arm_length_body
+Natural England,Natural England,arm_length_body
+Department of Health and Social Care,Department of Health and Social Care,government_department
+DHSC,Department of Health and Social Care,government_department
+Ministry of Defence,Ministry of Defence,government_department
+MoD,Ministry of Defence,government_department
+Ministry of Defence (MoD),Ministry of Defence,government_department
+Department for Education,Department for Education,government_department
+DfE,Department for Education,government_department
+Cabinet Office,Cabinet Office,government_department
+HM Treasury,HM Treasury,government_department
+Treasury,HM Treasury,government_department
+Department for Transport,Department for Transport,government_department
+DfT,Department for Transport,government_department
+Department for Energy Security and Net Zero,Department for Energy Security and Net Zero,government_department
+DESNZ,Department for Energy Security and Net Zero,government_department
+Foreign Commonwealth and Development Office,Foreign Commonwealth and Development Office,government_department
+"Foreign, Commonwealth & Development Office",Foreign Commonwealth and Development Office,government_department
+FCDO,Foreign Commonwealth and Development Office,government_department
+Department for Business and Trade,Department for Business and Trade,government_department
+DBT,Department for Business and Trade,government_department
+Environment Agency,Environment Agency,arm_length_body
+Driver and Vehicle Licensing Agency,Driver and Vehicle Licensing Agency,executive_agency
+DVLA,Driver and Vehicle Licensing Agency,executive_agency
+UK Health Security Agency,UK Health Security Agency,arm_length_body
+UKHSA,UK Health Security Agency,arm_length_body
+Government Digital Service,Government Digital Service,executive_agency
+GDS,Government Digital Service,executive_agency
+HM Land Registry,HM Land Registry,executive_agency
+Land Registry,HM Land Registry,executive_agency
+HMLR,HM Land Registry,executive_agency

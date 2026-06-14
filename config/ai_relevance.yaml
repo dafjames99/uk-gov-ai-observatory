@@ -1,0 +1,46 @@
+# AI-relevance classification config
+# Version this file. Store ai_relevance_version alongside each flagged record
+# so that tightening or loosening the definition doesn't silently shift historical stats.
+version: "1.0"
+
+# Keyword matching is case-insensitive and applied to title + description fields.
+# Start narrow — expand deliberately after spot-checking near-misses.
+keywords:
+  - artificial intelligence
+  - machine learning
+  - deep learning
+  - neural network
+  - large language model
+  - generative ai
+  - llm
+  - natural language processing
+  - nlp
+  - computer vision
+  - automated decision
+  - predictive analytics
+  - predictive model
+  - algorithm
+  - algorithmic
+
+# CPV code matching — a notice is flagged if any of its cpv_codes match.
+# Format: a prefix string; any CPV code starting with this value is matched.
+# 72xxxxxx = IT services broadly; 48xxxxxx = software packages.
+# These are deliberately broad; narrow via the keywords filter for relevance.
+cpv_code_prefixes:
+  - "7221"   # Programming services
+  - "7222"   # Systems and technical consultancy
+  - "7223"   # Data processing services
+  - "7224"   # Database services
+  - "7226"   # Computer-related services
+  - "7231"   # Computer programming services
+  - "7232"   # Internet services
+  - "4800"   # Software package and information systems
+  - "4815"   # Database software packages
+  - "4816"   # Exchange software packages
+  - "4817"   # Office software packages
+
+# A procurement notice is AI-relevant if:
+#   (any keyword matches title OR description)
+#   OR (any cpv_code_prefix matches any of cpv_codes)
+# Both conditions are OR'd — either is sufficient.
+match_logic: any
