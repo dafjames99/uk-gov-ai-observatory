@@ -44,7 +44,10 @@ def fetch_releases(
         Tuple of (all_releases, raw_pages) where raw_pages is a list of raw
         API response dicts suitable for Bronze storage.
     """
-    params = {
+    # The API uses cursor-based pagination; the 'links.next' URL carries the
+    # cursor token for the following page. We follow it directly rather than
+    # incrementing a page counter, which would re-request the same results.
+    initial_params = {
         "publishedFrom": f"{from_date}T00:00:00",
         "publishedTo": f"{to_date}T23:59:59",
         "stages": stages,
@@ -53,14 +56,17 @@ def fetch_releases(
 
     all_releases: list[dict] = []
     raw_pages: list[dict] = []
+    next_url: str | None = None
     page = 1
 
     while True:
-        params["page"] = page
         logger.info("Fetching Contracts Finder page %d (%s → %s)", page, from_date, to_date)
 
         try:
-            data = session.get_json(_BASE_URL, params=params)
+            if next_url:
+                data = session.get_json(next_url)
+            else:
+                data = session.get_json(_BASE_URL, params=initial_params)
         except Exception:
             logger.exception("Failed fetching page %d — stopping pagination", page)
             break
@@ -75,9 +81,8 @@ def fetch_releases(
         all_releases.extend(releases)
         logger.debug("Page %d: %d releases (total so far: %d)", page, len(releases), len(all_releases))
 
-        # Some OCDS APIs signal last page via a missing/empty 'next' link
-        links = data.get("links", {})
-        if links and not links.get("next"):
+        next_url = (data.get("links") or {}).get("next")
+        if not next_url:
             logger.info("No 'next' link on page %d — pagination complete", page)
             break
 
@@ -282,7 +287,7 @@ def upsert_notices(
         r[0]
         for r in conn.execute("SELECT notice_id FROM procurement_notices").fetchall()
     }
-    new_df = df[~df["notice_id"].isin(existing)]
+    new_df = df[~df["notice_id"].isin(existing)].drop_duplicates(subset=["notice_id"])
 
     if new_df.empty:
         logger.info("No new notices to insert (all %d already present)", len(df))
