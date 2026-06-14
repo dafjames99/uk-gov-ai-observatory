@@ -42,7 +42,7 @@ def seed_from_csv(csv_path: str, conn: duckdb.DuckDBPyConnection) -> int:
     Returns:
         Number of rows inserted.
     """
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path).drop_duplicates(subset=["raw_name"])
     existing = {r[0] for r in conn.execute("SELECT raw_name FROM org_aliases").fetchall()}
     new_rows = df[~df["raw_name"].isin(existing)]
     if not new_rows.empty:
