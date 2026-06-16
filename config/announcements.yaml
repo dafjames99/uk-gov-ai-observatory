@@ -1,0 +1,35 @@
+# GOV.UK announcements ingestion config (Axis B — intent).
+#
+# The Search API full-text `q` is a loose candidate generator; each result is
+# re-scored locally with the AI-relevance classifier (config/ai_relevance.yaml)
+# so only announcements whose title/description actually mention AI are kept.
+version: "1.0"
+
+# content_store_document_type values to include. These are the announcement-like
+# formats; transactional/manual pages are excluded.
+document_types:
+  - press_release
+  - news_story
+  - policy_paper
+  - consultation
+  - open_consultation
+  - closed_consultation
+  - guidance
+  - speech
+
+# Candidate search queries (run independently, results unioned and deduped).
+# Cover AI policy/intent plus the AI-infrastructure (capacity) vocabulary; the
+# local classifier then enforces precision.
+search_queries:
+  - artificial intelligence
+  - machine learning
+  - generative AI
+  - large language model
+  - AI Growth Zone
+  - sovereign AI
+  - AI infrastructure
+  - AI compute
+  - frontier AI
+
+# Stop paginating a single query after this many results (relevance-ordered).
+max_per_query: 300
