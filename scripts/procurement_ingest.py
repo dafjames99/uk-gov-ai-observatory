@@ -1,9 +1,12 @@
-"""Fetch AI-relevant procurement notices from Contracts Finder and load into Silver.
+"""Fetch AI-relevant procurement notices from a source and load into Silver.
+
+This is the incremental weekly tail; use procurement_backfill.py for history.
 
 Usage:
-    uv run python scripts/procurement_ingest.py
-    uv run python scripts/procurement_ingest.py --from-date 2025-01-01 --to-date 2025-06-01
-    uv run python scripts/procurement_ingest.py --dry-run
+    uv run python -m scripts.procurement_ingest
+    uv run python -m scripts.procurement_ingest --source find_a_tender
+    uv run python -m scripts.procurement_ingest --from-date 2025-01-01 --to-date 2025-06-01
+    uv run python -m scripts.procurement_ingest --dry-run
 """
 
 import argparse
@@ -14,7 +17,13 @@ from pathlib import Path
 
 from src.common.db import get_connection, init_schema
 from src.common.http import build_session
-from src.ingest.procurement import fetch_releases, parse_release, save_bronze, upsert_notices
+from src.ingest.procurement import (
+    SOURCES,
+    fetch_releases,
+    parse_release,
+    save_bronze,
+    upsert_notices,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,7 +37,13 @@ DEFAULT_LOOKBACK_DAYS = 7
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Ingest Contracts Finder notices into Silver.")
+    p = argparse.ArgumentParser(description="Ingest procurement notices into Silver.")
+    p.add_argument(
+        "--source",
+        choices=tuple(SOURCES),
+        default="contracts_finder",
+        help="Procurement source to ingest. Default: contracts_finder.",
+    )
     p.add_argument(
         "--from-date",
         type=date.fromisoformat,
@@ -43,8 +58,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--stages",
-        default="award,planning,tender,contract",
-        help="Comma-separated OCDS stage filter.",
+        default=None,
+        help="Comma-separated OCDS stage filter. Default: the source's stages.",
     )
     p.add_argument(
         "--dry-run",
@@ -61,12 +76,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    source = SOURCES[args.source]
 
     logger.info(
-        "Starting Contracts Finder ingest: %s → %s (stages: %s)",
+        "Starting %s ingest: %s → %s (stages: %s)",
+        source.name,
         args.from_date,
         args.to_date,
-        args.stages,
+        args.stages or source.default_stages or "all",
     )
 
     session = build_session(rate_limit_delay=2.0)
@@ -75,19 +92,20 @@ def main() -> int:
         session,
         from_date=args.from_date,
         to_date=args.to_date,
+        source=source,
         stages=args.stages,
     )
 
     logger.info("Fetched %d total releases across %d pages", len(releases), len(raw_pages))
 
     if not args.skip_bronze and raw_pages:
-        save_bronze(raw_pages, run_date=date.today(), bronze_root=BRONZE_ROOT)
+        save_bronze(raw_pages, run_date=date.today(), bronze_root=BRONZE_ROOT, source_name=source.name)
 
     notices = []
     parse_errors = 0
     for release in releases:
         try:
-            notice = parse_release(release)
+            notice = parse_release(release, source)
             if notice:
                 notices.append(notice)
         except Exception:

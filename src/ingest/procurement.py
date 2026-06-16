@@ -2,6 +2,7 @@
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,13 +11,51 @@ import duckdb
 import pandas as pd
 
 from src.common.http import RateLimitedSession
-from src.ingest.ai_relevance import config_version, is_ai_relevant
+from src.ingest.ai_relevance import classify, config_version
 
 logger = logging.getLogger(__name__)
 
-_BASE_URL = "https://www.contractsfinder.service.gov.uk/Published/Notices/OCDS/Search"
 _PAGE_SIZE = 100
-_ALL_STAGES = "award,planning,tender,contract"
+
+
+@dataclass(frozen=True)
+class Source:
+    """Configuration for an OCDS procurement source.
+
+    Contracts Finder and Find a Tender share the OCDS release shape and a
+    'links.next' cursor pagination model; only the endpoint, date-filter
+    parameter names, page-size parameter and public notice URL differ.
+    """
+
+    name: str
+    base_url: str
+    from_param: str
+    to_param: str
+    size_param: str
+    default_stages: str | None  # None → omit the param (source returns all stages)
+
+
+CONTRACTS_FINDER = Source(
+    name="contracts_finder",
+    base_url="https://www.contractsfinder.service.gov.uk/Published/Notices/OCDS/Search",
+    from_param="publishedFrom",
+    to_param="publishedTo",
+    size_param="size",
+    default_stages="award,planning,tender,contract",
+)
+
+FIND_A_TENDER = Source(
+    name="find_a_tender",
+    base_url="https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages",
+    from_param="updatedFrom",
+    to_param="updatedTo",
+    size_param="limit",
+    # FTS rejects a comma-separated stages list (returns nothing); omit it and
+    # take all stages rather than making one request per stage.
+    default_stages=None,
+)
+
+SOURCES: dict[str, Source] = {s.name: s for s in (CONTRACTS_FINDER, FIND_A_TENDER)}
 
 
 # ---------------------------------------------------------------------------
@@ -28,31 +67,37 @@ def fetch_releases(
     session: RateLimitedSession,
     from_date: date,
     to_date: date,
-    stages: str = _ALL_STAGES,
+    source: Source = CONTRACTS_FINDER,
+    stages: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Fetch all OCDS releases from Contracts Finder for the given date range.
+    """Fetch all OCDS releases from a procurement source for a date range.
 
-    Paginates until the API returns an empty releases array.
+    Paginates until the API returns an empty releases array. Find a Tender
+    filters on the *updated* timestamp; Contracts Finder on *published* —
+    handled via the source's from/to parameter names.
 
     Args:
         session: A configured RateLimitedSession.
-        from_date: Start of the published date range (inclusive).
-        to_date: End of the published date range (inclusive).
-        stages: Comma-separated stage filter string.
+        from_date: Start of the date range (inclusive).
+        to_date: End of the date range (inclusive).
+        source: Which procurement source to query.
+        stages: Comma-separated stage filter; defaults to the source's stages.
 
     Returns:
         Tuple of (all_releases, raw_pages) where raw_pages is a list of raw
         API response dicts suitable for Bronze storage.
     """
-    # The API uses cursor-based pagination; the 'links.next' URL carries the
+    # Both sources use cursor-based pagination; the 'links.next' URL carries the
     # cursor token for the following page. We follow it directly rather than
     # incrementing a page counter, which would re-request the same results.
     initial_params = {
-        "publishedFrom": f"{from_date}T00:00:00",
-        "publishedTo": f"{to_date}T23:59:59",
-        "stages": stages,
-        "size": _PAGE_SIZE,
+        source.from_param: f"{from_date}T00:00:00",
+        source.to_param: f"{to_date}T23:59:59",
+        source.size_param: _PAGE_SIZE,
     }
+    effective_stages = stages or source.default_stages
+    if effective_stages:
+        initial_params["stages"] = effective_stages
 
     all_releases: list[dict] = []
     raw_pages: list[dict] = []
@@ -60,13 +105,13 @@ def fetch_releases(
     page = 1
 
     while True:
-        logger.info("Fetching Contracts Finder page %d (%s → %s)", page, from_date, to_date)
+        logger.info("Fetching %s page %d (%s → %s)", source.name, page, from_date, to_date)
 
         try:
             if next_url:
                 data = session.get_json(next_url)
             else:
-                data = session.get_json(_BASE_URL, params=initial_params)
+                data = session.get_json(source.base_url, params=initial_params)
         except Exception:
             logger.exception("Failed fetching page %d — stopping pagination", page)
             break
@@ -91,18 +136,24 @@ def fetch_releases(
     return all_releases, raw_pages
 
 
-def save_bronze(raw_pages: list[dict], run_date: date, bronze_root: Path) -> Path:
+def save_bronze(
+    raw_pages: list[dict],
+    run_date: date,
+    bronze_root: Path,
+    source_name: str = "contracts_finder",
+) -> Path:
     """Write raw API response pages to the Bronze layer.
 
     Args:
         raw_pages: List of raw API response dicts.
         run_date: The date this run was executed (used for directory naming).
         bronze_root: Root directory for Bronze storage.
+        source_name: Source key, used as the Bronze sub-directory.
 
     Returns:
         Path to the directory where pages were written.
     """
-    out_dir = bronze_root / "contracts_finder" / run_date.isoformat()
+    out_dir = bronze_root / source_name / run_date.isoformat()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for i, page in enumerate(raw_pages, start=1):
@@ -156,6 +207,112 @@ def _extract_supplier(release: dict) -> tuple[str, str | None]:
     return "supplier_unknown", None
 
 
+def _extract_documents(release: dict) -> list[dict[str, str | None]]:
+    """Collect document links from the tender and any awards.
+
+    OCDS documents carry the real detail behind thin notice descriptions
+    (tender packs, specifications, award letters). Deduplicated on URL.
+
+    Returns:
+        List of {title, url, documentType} dicts.
+    """
+    docs: list[dict[str, str | None]] = []
+    seen: set[str] = set()
+
+    def _add(d: dict) -> None:
+        url = d.get("url")
+        if not url or url in seen:
+            return
+        seen.add(url)
+        docs.append(
+            {
+                "title": d.get("title") or d.get("description"),
+                "url": url,
+                "documentType": d.get("documentType"),
+            }
+        )
+
+    for d in release.get("tender", {}).get("documents", []) or []:
+        _add(d)
+    for award in release.get("awards", []) or []:
+        for d in award.get("documents", []) or []:
+            _add(d)
+    return docs
+
+
+def _contract_status(release: dict) -> str:
+    """Derive a plain-English lifecycle status for a contracting process.
+
+    Maps the OCDS tender.status and awards[].status onto the states a reader
+    cares about:
+      awarded  — a supplier has been awarded (money committed). Value is the
+                 awarded value, or for a framework the shared ceiling.
+      open     — out to tender now; not yet awarded. Value is the estimated max.
+      planned  — future pipeline, pre-tender.
+      closed   — tender complete but no award captured (unsuccessful, or the
+                 award is not disclosed in this notice).
+      cancelled/unsuccessful/withdrawn — as stated by the publisher.
+      unknown  — status not determinable.
+    """
+    awards = release.get("awards") or []
+    if any(a.get("suppliers") and a.get("status") in (None, "active") for a in awards):
+        return "awarded"
+    tender_status = (release.get("tender") or {}).get("status")
+    if tender_status in ("active",):
+        return "open"
+    if tender_status in ("planning", "planned"):
+        return "planned"
+    if tender_status in ("cancelled", "unsuccessful", "withdrawn"):
+        return tender_status
+    if tender_status in ("complete",):
+        return "closed"
+    return "unknown"
+
+
+def _notice_url(documents: list[dict], ocid: str, source: "Source") -> tuple[str | None, str]:
+    """Resolve the canonical public notice URL and a link_status.
+
+    The reliable source is the OCDS document whose URL points at the notice
+    web page (the publisher's own link). Contracts Finder notice URLs use the
+    bare GUID — NOT the full ocid (the ocds-b5fd17- prefix must be stripped).
+    Find a Tender's human notice number (e.g. 056365-2025) exists only in the
+    document URL, so a notice with no documents cannot be linked.
+
+    Returns:
+        (url, link_status) where link_status is 'ok' or 'unresolved'.
+    """
+    domain = "contractsfinder.service.gov.uk" if source.name == "contracts_finder" else "find-tender.service.gov.uk"
+    notice_docs = [d for d in documents if d.get("url") and domain in d["url"]]
+    for doc_type in ("tenderNotice", "awardNotice", "contractNotice"):
+        for d in notice_docs:
+            if d.get("documentType") == doc_type:
+                return d["url"], "ok"
+    if notice_docs:
+        return notice_docs[0]["url"], "ok"
+
+    # No notice document: Contracts Finder can be constructed from the GUID;
+    # Find a Tender cannot (the notice number is not in the bulk record).
+    if source.name == "contracts_finder" and ocid:
+        guid = ocid.split("ocds-b5fd17-")[-1]
+        return f"https://www.contractsfinder.service.gov.uk/Notice/{guid}", "ok"
+    return None, "unresolved"
+
+
+def _extract_framework_id(release: dict) -> str | None:
+    """Return the framework identifier if this notice is a call-off.
+
+    CF/FTS OCDS does not populate tender.techniques reliably; the framework
+    link lives in relatedProcesses with a 'framework' relationship.
+    """
+    for rp in release.get("relatedProcesses", []) or []:
+        rel = rp.get("relationship") or []
+        if isinstance(rel, str):
+            rel = [rel]
+        if any("framework" in str(r).lower() for r in rel):
+            return rp.get("identifier") or rp.get("id")
+    return None
+
+
 def _extract_dates(release: dict) -> tuple[str | None, str | None, str | None]:
     """Return (published_date, contract_start, contract_end) as ISO date strings."""
     published = release.get("date") or release.get("publishedDate")
@@ -187,13 +344,17 @@ def _extract_dates(release: dict) -> tuple[str | None, str | None, str | None]:
     return published_str, start, end
 
 
-def parse_release(release: dict) -> dict[str, Any] | None:
+def parse_release(
+    release: dict, source: Source = CONTRACTS_FINDER
+) -> dict[str, Any] | None:
     """Parse a single OCDS release dict into a Silver-layer notice dict.
 
     Returns None if the release lacks the minimum required fields (ocid, id).
 
     Args:
         release: Raw OCDS release dict.
+        source: The procurement source the release came from (sets the
+            `source` field and public notice URL).
 
     Returns:
         Normalised notice dict, or None.
@@ -213,17 +374,27 @@ def parse_release(release: dict) -> dict[str, Any] | None:
     value_amount, currency = _extract_value(release)
     supplier_name, supplier_id = _extract_supplier(release)
     published_date, contract_start, contract_end = _extract_dates(release)
+    documents = _extract_documents(release)
+    awards = release.get("awards") or []
+    framework_id = _extract_framework_id(release)
+    procurement_method = tender.get("procurementMethod")
+    tender_status = tender.get("status")
+    contract_status = _contract_status(release)
+    source_url, link_status = _notice_url(documents, ocid, source)
 
     tags = release.get("tag", [])
     stage = tags[0] if tags else release.get("stage")
 
-    ai_rel = is_ai_relevant(title, description, cpv_codes)
+    ai_confidence = classify(title, description, cpv_codes)
+    ai_rel = ai_confidence != "none"
     rel_version = config_version()
 
     return {
         "notice_id": f"{ocid}::{release_id}",
-        "source": "contracts_finder",
+        "source": source.name,
         "stage": stage,
+        "tender_status": tender_status,
+        "contract_status": contract_status,
         "title": _force_utf8(title),
         "description": _force_utf8(description),
         "value_amount": value_amount,
@@ -233,13 +404,18 @@ def parse_release(release: dict) -> dict[str, Any] | None:
         "supplier_name": supplier_name,
         "supplier_id": supplier_id,
         "cpv_codes": json.dumps(cpv_codes),
+        "documents": json.dumps(documents) if documents else None,
+        "awards": json.dumps(awards) if awards else None,
+        "framework_id": framework_id,
+        "procurement_method": procurement_method,
         "published_date": published_date,
         "contract_start": contract_start,
         "contract_end": contract_end,
         "ai_relevant": ai_rel,
+        "ai_confidence": ai_confidence,
         "ai_relevance_version": rel_version,
-        "link_status": "ok",
-        "source_url": f"https://www.contractsfinder.service.gov.uk/Notice/{ocid}",
+        "link_status": link_status,
+        "source_url": source_url,
         "ingested_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -293,8 +469,13 @@ def upsert_notices(
         logger.info("No new notices to insert (all %d already present)", len(df))
         return 0
 
+    # Insert by explicit column names (not positional SELECT *) so that columns
+    # present in the table but not emitted by parse_release default to NULL.
+    cols = ", ".join(new_df.columns)
     conn.register("_notices_tmp", new_df)
-    conn.execute("INSERT INTO procurement_notices SELECT * FROM _notices_tmp")
+    conn.execute(
+        f"INSERT INTO procurement_notices ({cols}) SELECT {cols} FROM _notices_tmp"
+    )
     conn.unregister("_notices_tmp")
 
     logger.info("Inserted %d new notices into Silver", len(new_df))

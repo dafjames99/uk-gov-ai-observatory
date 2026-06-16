@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.common.db import get_connection, init_schema
 from src.common.org_aliases import seed_from_csv
+from src.common.seeds import seed_table_from_csv
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -29,6 +30,12 @@ def main() -> None:
 
     total = conn.execute("SELECT COUNT(*) FROM org_aliases").fetchone()[0]
     logger.info("org_aliases total rows: %d", total)
+
+    zones_csv = SEEDS_DIR / "ai_growth_zones.csv"
+    logger.info("Seeding ai_growth_zones from %s...", zones_csv)
+    zones_inserted = seed_table_from_csv(str(zones_csv), "ai_growth_zones", "zone_id", conn)
+    zones_total = conn.execute("SELECT COUNT(*) FROM ai_growth_zones").fetchone()[0]
+    logger.info("Done — %d new rows inserted; ai_growth_zones total: %d.", zones_inserted, zones_total)
 
     conn.close()
     logger.info("Database initialised successfully.")

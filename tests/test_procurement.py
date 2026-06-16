@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from src.common.db import get_connection, init_schema
-from src.ingest.procurement import parse_release, upsert_notices
+from src.ingest.procurement import (
+    CONTRACTS_FINDER,
+    FIND_A_TENDER,
+    parse_release,
+    upsert_notices,
+)
 
 # ---------------------------------------------------------------------------
 # Minimal OCDS release fixture
@@ -22,6 +27,7 @@ _AWARD_RELEASE = {
         "title": "Machine Learning Fraud Detection Platform",
         "description": "Automated fraud detection using machine learning algorithms.",
         "value": {"amount": 250000, "currency": "GBP"},
+        "procurementMethod": "selective",
         "items": [
             {
                 "id": "1",
@@ -29,11 +35,17 @@ _AWARD_RELEASE = {
             }
         ],
         "contractPeriod": {"startDate": "2025-04-01T00:00:00Z", "endDate": "2026-03-31T00:00:00Z"},
+        "documents": [
+            {"id": "1", "url": "https://example.gov.uk/spec.pdf", "description": "Specification", "documentType": "tenderNotice"}
+        ],
     },
     "buyer": {
         "name": "Department for Work and Pensions",
         "identifier": {"scheme": "GB-GOR", "id": "D10"},
     },
+    "relatedProcesses": [
+        {"id": "1", "relationship": ["framework"], "identifier": "ocds-b5fd17-fwk-9"}
+    ],
     "awards": [
         {
             "id": "award-1",
@@ -42,6 +54,9 @@ _AWARD_RELEASE = {
                 {"name": "TechCorp Ltd", "identifier": {"scheme": "GB-COH", "id": "12345678"}}
             ],
             "contractPeriod": {"startDate": "2025-04-15T00:00:00Z", "endDate": "2026-04-14T00:00:00Z"},
+            "documents": [
+                {"id": "2", "url": "https://example.gov.uk/award.pdf", "title": "Award letter", "documentType": "awardNotice"}
+            ],
         }
     ],
 }
@@ -103,7 +118,72 @@ def test_parse_award_release():
     assert n["contract_start"] == "2025-04-15"
     assert n["contract_end"] == "2026-04-14"
     assert n["ai_relevant"] is True
+    assert n["ai_confidence"] == "strong"  # "machine learning" is a strong keyword
     assert n["link_status"] == "ok"
+
+
+def test_parse_extracts_v2_fields():
+    n = parse_release(_AWARD_RELEASE)
+    assert n["procurement_method"] == "selective"
+    assert n["framework_id"] == "ocds-b5fd17-fwk-9"
+    # Documents merged from tender + award, deduped on URL, with title fallback.
+    docs = json.loads(n["documents"])
+    urls = {d["url"] for d in docs}
+    assert urls == {"https://example.gov.uk/spec.pdf", "https://example.gov.uk/award.pdf"}
+    spec = next(d for d in docs if d["url"].endswith("spec.pdf"))
+    assert spec["title"] == "Specification"  # falls back to description
+    # Full awards array retained.
+    awards = json.loads(n["awards"])
+    assert len(awards) == 1 and awards[0]["id"] == "award-1"
+
+
+def test_parse_with_find_a_tender_source():
+    n = parse_release(_AWARD_RELEASE, FIND_A_TENDER)
+    assert n["source"] == "find_a_tender"
+    # The fixture has no Find a Tender notice document → link is unresolvable.
+    assert n["source_url"] is None
+    assert n["link_status"] == "unresolved"
+    # CF constructs from the bare GUID (ocds-b5fd17- stripped).
+    cf = parse_release(_AWARD_RELEASE, CONTRACTS_FINDER)
+    assert cf["source"] == "contracts_finder"
+    assert cf["source_url"] == "https://www.contractsfinder.service.gov.uk/Notice/test-001"
+    assert cf["link_status"] == "ok"
+
+
+def test_contract_status_derivation():
+    from src.ingest.procurement import _contract_status
+
+    awarded = {"awards": [{"status": "active", "suppliers": [{"name": "X"}]}]}
+    assert _contract_status(awarded) == "awarded"
+    assert _contract_status({"tender": {"status": "active"}}) == "open"
+    assert _contract_status({"tender": {"status": "planning"}}) == "planned"
+    assert _contract_status({"tender": {"status": "complete"}}) == "closed"
+    assert _contract_status({"tender": {"status": "cancelled"}}) == "cancelled"
+    assert _contract_status({}) == "unknown"
+    # An award with no supplier is not yet an award.
+    assert _contract_status({"awards": [{"status": "active"}], "tender": {"status": "active"}}) == "open"
+
+
+def test_parse_award_release_status():
+    assert parse_release(_AWARD_RELEASE)["contract_status"] == "awarded"
+
+
+def test_notice_url_resolution():
+    from src.ingest.procurement import CONTRACTS_FINDER, FIND_A_TENDER, _notice_url
+
+    cf_docs = [{"documentType": "awardNotice", "url": "https://www.contractsfinder.service.gov.uk/Notice/abc-123"}]
+    assert _notice_url(cf_docs, "ocds-b5fd17-abc-123", CONTRACTS_FINDER) == (
+        "https://www.contractsfinder.service.gov.uk/Notice/abc-123", "ok",
+    )
+    # CF with no document → construct from the bare GUID (strip ocds-b5fd17-).
+    assert _notice_url([], "ocds-b5fd17-xyz-789", CONTRACTS_FINDER) == (
+        "https://www.contractsfinder.service.gov.uk/Notice/xyz-789", "ok",
+    )
+    # FTS uses the document URL when present.
+    fts_docs = [{"documentType": "tenderNotice", "url": "https://www.find-tender.service.gov.uk/Notice/056365-2025"}]
+    assert _notice_url(fts_docs, "ocds-h6vhtk-04ec11", FIND_A_TENDER)[0].endswith("/Notice/056365-2025")
+    # FTS with no document → unresolvable (notice number not in the record).
+    assert _notice_url([], "ocds-h6vhtk-04ec11", FIND_A_TENDER) == (None, "unresolved")
 
 
 def test_parse_non_ai_notice():
@@ -112,6 +192,10 @@ def test_parse_non_ai_notice():
     assert n["ai_relevant"] is False
     assert n["supplier_name"] == "supplier_unknown"
     assert n["stage"] == "tender"
+    # No documents / framework / awards on this fixture → None, not empty string.
+    assert n["documents"] is None
+    assert n["awards"] is None
+    assert n["framework_id"] is None
 
 
 def test_parse_anomalous_dates_nulled():
