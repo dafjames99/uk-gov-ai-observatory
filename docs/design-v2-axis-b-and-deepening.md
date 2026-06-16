@@ -272,4 +272,82 @@ A1–A2 alone remove the dead-end. A3–A5 complete Axis A. B1–B3 + B5–B6 op
 2. **`weak` relevance — strong-only headline, weak behind a toggle.** Headline £/counts use `strong` matches only; `weak` is queryable with a confidence badge. Keeps headline numbers defensible without discarding soft-signal AI. Rejected: including weak in headline (recreates the current false-positive problem).
 3. **Growth Zones curation — feed-flagged, hand-curated.** The announcements feed surfaces candidate zone announcements by keyword; the structured row (£, compute, status) is curated by hand. Detection automated, extraction human. Rejected: fully manual (misses announcements), fully automated (mangles stated figures).
 4. **Planning data — supplementary, England-only, with caveat.** Curated national `ai_growth_zones` carries the Capacity lens; planning.data.gov.uk adds England-only detail with a UI caveat. Deprioritised (B4, post-dashboard). Rejected: core England-only source (misses devolved marquee zones), pursuing devolved portals now (heavy scraping, marginal coverage).
-```
+
+---
+
+## 11. Implementation status (as of 16 June 2026)
+
+**Done & committed** (branch `feat/v2-schema-migrations`, ~20 commits, 76 tests):
+
+- **A1–A5** — schema + `migrate()`; bulk OCDS backfill (CF + FTS, 2021–2026, ~33k AI-relevant notices); richer `parse_release` (documents, awards, framework_id, procurement_method); Find a Tender live source; tiered AI-relevance v2 with word-boundary matching.
+- **Procurement data-quality work beyond the original plan** (driven by review):
+  - **De-duplication** — `v_procurement_dedup` keyed on `buyer + value + LEFT(normalised_title, 50)` (no supplier; suppliers live in `awards[]`). Collapses stage/source/title-truncation duplicates.
+  - **Contract lifecycle status** — `contract_status` derived from OCDS `tender.status` + `awards[].status` (awarded / open / planned / closed / cancelled / withdrawn / unsuccessful). Dashboard now distinguishes "awarded £10.1bn committed" from "open/planned pipeline".
+  - **Notice URLs** — corrected to the canonical GOV.UK notice pages from `documents[]` (CF 100%, FTS 7% — bulk archive drops the notice number).
+- **B1–B3, B5–B6** — `gov_announcements` feed; `ai_growth_zones` register; `written_questions`; Gold views + year-partitioned procurement export; dashboard rebuilt into USE / INTENT / CAPACITY lenses.
+
+**Outstanding:**
+
+- **B4** — planning.data.gov.uk data-centre feed (supplementary, §10.4).
+- **§12 — INTENT data-quality work (below).** The procurement (Axis A) feed has had a thorough quality pass (dedup, status, relevance, links); the INTENT feeds (`gov_announcements`, `written_questions`) have **not** had the equivalent. This is the next data-model task.
+
+---
+
+## 12. INTENT data-quality review — OUTSTANDING
+
+A review of the 511 ingested announcements (16 June 2026). Findings are recorded; **none of §12.2–12.4 is implemented yet.** This is the INTENT analogue of the procurement dedup/status work and should be settled before the Next.js frontend, since it changes the announcements data model.
+
+### 12.1 Findings
+
+**Already sound (no fix needed):**
+- **Relevance precision is high.** The classifier runs on the curated GOV.UK title + summary, where AI is named explicitly, so a match is genuinely about AI — no CPV-style noise. (Even non-obvious hits check out: the "Holocaust" items are about AI-generated distortion of Holocaust memory.)
+- **No exact duplicates** — every announcement has a unique GOV.UK base_path; 511/511 unique titles. There is no procurement-style exact dedup to do.
+- **Rich, correct attribution** — DSIT (206), then Dstl, MHRA, No.10, FCDO, MOD, DfE, DHSC… cross-government; every row has ≥1 organisation.
+
+**Genuine gaps (different in kind from Axis A):**
+1. **Semantic overlap / programme clustering** — announcements don't duplicate but cluster around programmes: 7× "AI Growth Zones", 5× "AI Opportunities Action Plan", an "AI Safety Summit" series, "generative AI in education" modules 1–4. Distinct events (sustained attention is *signal*), but there is no way to see the thread. This is the headline gap.
+2. **Document types are lumped but mean different things** — `consultation` (seeking views) vs `policy_paper` (decided policy) vs `guidance` (operational, e.g. "Police use of AI factsheet") vs `press_release` / `news_story` vs `speech`. A reader needs to know whether a row is a decision, a position, a how-to, or a request for input.
+3. **The strong/weak confidence tier is meaningless here** (502 strong / 9 weak) — the AI-centric search queries make almost everything "strong". Harmless but should not be presented as a real axis for announcements.
+4. **Recall depends on a fixed set of 9 search queries** — coverage/bias risk: AI announcements using none of those terms are missed. Bounded but undocumented.
+5. **`written_questions` has had no equivalent review** — it is cleaner (structured API), but the same questions apply (relevance precision, grouped questions, topic threading).
+
+### 12.2 Proposed data-model additions (`gov_announcements`)
+
+| Field | Purpose |
+|---|---|
+| `announcement_category` | Bucket over `document_type`: **policy** (policy_paper, guidance) · **announcement** (press_release, news_story) · **speech** · **consultation** (open/closed). Objective, deterministic. |
+| `topic_tags` (exists, unused) | Stable theme keys (e.g. `ai-growth-zones`, `ai-safety`, `action-plan`, `ai-health`, `ai-defence`, `copyright-ip`, `ai-regulation`). Multi-valued. The answer to the overlap problem. |
+| `related_ids` (optional) | Near-duplicate / same-event links (a press release + speech + news story about one event). |
+| (demote) `ai_confidence` | Keep for schema symmetry but document that it is ~constant for announcements; do not surface as a filter. |
+
+### 12.3 Theme assignment — approaches, and where unsupervised clustering fits
+
+The core tension: a dashboard/frontend needs **stable, named themes** ("AI Growth Zones" must be the same filterable key every week), whereas unsupervised methods give **discovery** but unstable, unlabeled clusters. Against this corpus (≈500 *short* docs — title+summary — growing slowly):
+
+- **Deterministic keyword→theme config** (like `ai_relevance.yaml`). *Pros:* free, transparent, versioned, stable keys, immediate, matches project ethos. *Cons:* manual taxonomy upkeep; misses themes not anticipated; 0-or-many matches.
+- **LDA / NMF topic modelling.** *Poor fit.* Bag-of-words topic models are weak on short texts, want thousands of docs, are unstable, and produce word-lists you must hand-label anyway — made worse because every doc contains "AI". Not recommended.
+- **Embedding clustering / BERTopic** (sentence embeddings → UMAP → HDBSCAN → c-TF-IDF labels). *Pros:* strong on short docs; captures semantics ("compute" ≈ "data centre" ≈ "GPU"); HDBSCAN finds a natural cluster count and leaves outliers unclustered; runs **free & local** (e.g. `all-MiniLM-L6-v2`, ~80MB, fine in GitHub Actions — keeps £0/keyless). *Cons:* cluster IDs are **unstable** as data grows and clusters are **unlabeled** — poor as a *live tagging* mechanism a persistent model depends on; UMAP is stochastic (needs seeding).
+- **LLM tagging** (the dormant `src/enrich/` seam). *Pros:* best semantics; can map to a *controlled* vocabulary (stable keys) and extract entities (the specific deal, £, companies); cheap at this volume (≈pennies for 511 short docs). *Cons:* API key + small cost; non-deterministic unless temp 0 + cached.
+
+**Recommended architecture — a two-stage hybrid that uses clustering for what it's good at:**
+
+1. **Discovery (offline, occasional):** run BERTopic/embedding clustering as an *analysis* to **discover and audit the theme taxonomy** — not to assign live tags. This captures the benefit the user is after (finding structure you didn't predefine) without inheriting cluster instability.
+2. **Assignment (live, stable):** tag each announcement against that curated taxonomy — **deterministic keyword config now**, upgraded to **LLM-with-controlled-vocabulary later** (the existing `topic_tags` + `enrichment_version` seam). Stable theme keys → a clean data model for the frontend.
+
+Separately, embeddings have a **second, independent high-value use** that needs *no* global taxonomy and directly answers "do announcements overlap?": **cosine-similarity near-duplicate / same-event detection** → populate `related_ids` and a "related announcements" UI affordance. This is the most defensible clustering application here and is worth doing on its own merits.
+
+**Scale note:** this is small, slowly-growing data (hundreds → low thousands). That favours lightweight, stable mechanisms (deterministic taxonomy + occasional embedding analysis) over standing topic-modelling infrastructure. Local MiniLM embeddings keep the £0/keyless constraint; an embeddings/LLM API would not.
+
+### 12.4 Other outstanding INTENT items
+
+- **Query recall/coverage** — assess what a broader query set surfaces; either widen the query list or document the bias.
+- **"Roundup" announcements** (e.g. "AI Opportunities Action Plan: One Year On") re-summarise many prior items — naturally handled by theme tags rather than special-casing.
+- **`written_questions` review** — mirror the relevance/threading questions; lighter, given the structured source. Group the API's `groupedQuestions` (questions tabled together) which are currently treated as independent.
+
+### 12.5 Suggested sequencing (when picked up)
+
+1. `announcement_category` buckets (objective, no taxonomy decisions) + demote `ai_confidence`.
+2. Deterministic theme taxonomy in `config/announcement_themes.yaml`, seeded by a one-off BERTopic discovery run; populate `topic_tags`.
+3. Embedding-based `related_ids` (near-duplicate / same-event).
+4. LLM upgrade of theme assignment + entity extraction via the `src/enrich/` seam (decide-later LLM call).
+5. Apply the equivalent pass to `written_questions`.
