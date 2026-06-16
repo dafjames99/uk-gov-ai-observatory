@@ -133,23 +133,25 @@ st.divider()
 # Top-line metrics
 # ---------------------------------------------------------------------------
 
+spend = proc["value_amount"].sum() if not proc.empty else 0
+median_val = proc["value_amount"].median() if not proc.empty else None
+
 m1, m2, m3, m4, m5, m6 = st.columns(6)
 m1.metric("ATRS records", len(atrs) if not atrs.empty else "—")
-m2.metric(f"AI contracts ({confidence_mode.split()[0].lower()})", len(proc) if not proc.empty else 0)
-spend = proc["value_amount"].sum() if not proc.empty else 0
-m3.metric("AI-flagged spend", f"£{spend/1e6:.0f}m" if spend else "£0")
+m2.metric(f"AI contracts ({confidence_mode.split()[0].lower()})", f"{len(proc):,}" if not proc.empty else 0)
+m3.metric("Median AI contract", f"£{median_val:,.0f}" if median_val is not None and pd.notna(median_val) else "—")
 m4.metric("AI announcements", len(announcements) if not announcements.empty else 0)
 m5.metric("AI written questions", len(wpq) if not wpq.empty else 0)
 pledged = zones["investment_gbp"].sum() if not zones.empty else 0
 m6.metric("Growth Zone £ pledged", f"£{pledged/1e9:.1f}bn" if pledged else "—")
 
 if not proc.empty:
-    median_val = proc["value_amount"].median()
     st.caption(
-        f"⚠️ *AI-flagged spend* sums notice values and is inflated by framework ceiling figures "
-        f"(e.g. multi-billion ICT frameworks that merely mention AI) and the same framework published "
-        f"as several notices — treat it as an upper bound, not actual AI outlay. "
-        f"Typical (median) AI-flagged contract: **£{median_val:,.0f}**."
+        f"Contracts are de-duplicated across stages, dates and both procurement sources "
+        f"(Contracts Finder + Find a Tender). Total AI-flagged contract value is "
+        f"**~£{spend/1e9:.0f}bn**, but that sums notice values and is inflated by framework ceiling "
+        f"figures (multi-billion ICT frameworks that merely mention AI) — treat it as an upper bound, "
+        f"not actual AI outlay. The **median** contract above is the reliable central figure."
     )
 
 st.divider()

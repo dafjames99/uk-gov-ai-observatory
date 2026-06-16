@@ -102,12 +102,38 @@ def test_gold_views_exist(conn):
         ).fetchall()
     }
     assert {
+        "v_procurement_dedup",
         "v_reporting_gap",
         "v_spend_by_month",
         "v_wpq_trends",
         "v_announcement_trends",
         "v_capacity_overview",
     } <= views
+
+
+def test_procurement_dedup_collapses_cross_source_duplicate(conn):
+    """The same contract on CF and FTS (different notice_id/ocid) collapses to one."""
+    rows = [
+        # Same buyer + title + value + supplier, published twice across sources.
+        ("ocds-b5fd17-aaa::r1", "contracts_finder", "AI Platform", 500000.0, "DWP", "TechCorp", "2024-01-10"),
+        ("ocds-h6vhtk-bbb::r1", "find_a_tender", "AI Platform", 500000.0, "DWP", "TechCorp", "2024-02-15"),
+        # A genuinely different contract (same buyer/title, different supplier) must survive.
+        ("ocds-b5fd17-ccc::r1", "contracts_finder", "AI Platform", 500000.0, "DWP", "OtherCo", "2024-01-10"),
+    ]
+    for nid, src, title, val, buyer, sup, pub in rows:
+        conn.execute(
+            "INSERT INTO procurement_notices (notice_id, source, title, value_amount, "
+            "buyer_name, supplier_name, published_date, ai_relevant, ai_confidence, ai_relevance_version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, 'strong', '2.0')",
+            [nid, src, title, val, buyer, sup, pub],
+        )
+
+    deduped = conn.execute("SELECT notice_id, source FROM v_procurement_dedup ORDER BY supplier_name").fetchall()
+    # TechCorp duplicate collapses to one (the most recent — FTS); OtherCo survives.
+    assert len(deduped) == 2
+    techcorp = [r for r in deduped if r[0].startswith("ocds-h6vhtk") or r[0].startswith("ocds-b5fd17-aaa")]
+    assert len(techcorp) == 1
+    assert techcorp[0][1] == "find_a_tender"  # most recent published_date won
 
 
 def test_org_aliases_seed(conn):

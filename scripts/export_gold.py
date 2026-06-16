@@ -32,11 +32,12 @@ def _export_procurement_by_year(conn) -> None:
     for stale in out_dir.glob("*.parquet"):
         stale.unlink()
 
+    # v_procurement_dedup is already AI-relevant and de-duplicated.
     years = conn.execute(
         """
         SELECT DISTINCT CAST(EXTRACT(year FROM published_date) AS INT) AS yr
-        FROM procurement_notices
-        WHERE ai_relevant = TRUE AND published_date IS NOT NULL
+        FROM v_procurement_dedup
+        WHERE published_date IS NOT NULL
         ORDER BY yr
         """
     ).fetchall()
@@ -46,28 +47,26 @@ def _export_procurement_by_year(conn) -> None:
         conn.execute(
             f"""
             COPY (
-                SELECT * FROM procurement_notices
-                WHERE ai_relevant = TRUE AND EXTRACT(year FROM published_date) = {yr}
+                SELECT * FROM v_procurement_dedup
+                WHERE EXTRACT(year FROM published_date) = {yr}
             ) TO '{out}' (FORMAT PARQUET)
             """
         )
         rows = conn.execute(
-            f"SELECT COUNT(*) FROM procurement_notices WHERE ai_relevant = TRUE "
-            f"AND EXTRACT(year FROM published_date) = {yr}"
+            f"SELECT COUNT(*) FROM v_procurement_dedup WHERE EXTRACT(year FROM published_date) = {yr}"
         ).fetchone()[0]
         logger.info("Exported procurement_notices/%d.parquet — %d rows", yr, rows)
 
     # Rows with no usable date still belong somewhere.
     unknown = out_dir / "unknown.parquet"
     n_unknown = conn.execute(
-        "SELECT COUNT(*) FROM procurement_notices WHERE ai_relevant = TRUE AND published_date IS NULL"
+        "SELECT COUNT(*) FROM v_procurement_dedup WHERE published_date IS NULL"
     ).fetchone()[0]
     if n_unknown:
         conn.execute(
             f"""
             COPY (
-                SELECT * FROM procurement_notices
-                WHERE ai_relevant = TRUE AND published_date IS NULL
+                SELECT * FROM v_procurement_dedup WHERE published_date IS NULL
             ) TO '{unknown}' (FORMAT PARQUET)
             """
         )

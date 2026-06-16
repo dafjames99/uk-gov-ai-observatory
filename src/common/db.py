@@ -199,14 +199,43 @@ def _init_gold_views(conn: duckdb.DuckDBPyConnection) -> None:
     Args:
         conn: An open DuckDB connection.
     """
+    # Canonical de-duplicated procurement. The same contract is often published
+    # more than once — across stages, across publication dates, and across both
+    # Contracts Finder and Find a Tender (which use different ocid namespaces, so
+    # there is no shared key). Collapse on buyer + title + value + supplier;
+    # including supplier avoids merging distinct awards on a shared framework.
+    # Buyer/title/supplier are normalised to alphanumerics only, so spacing and
+    # punctuation variants collapse too (e.g. "COMIT4 - ICT Solutions" vs
+    # "ComIT 4 - ICT Solutions"). Keep one representative per contract: prefer a
+    # row that carries a value, then the most recent publication. This is the
+    # analytical source of truth — the spend/gap views and Gold export read it.
+    conn.execute(r"""
+        CREATE OR REPLACE VIEW v_procurement_dedup AS
+        SELECT * EXCLUDE (_rn) FROM (
+            SELECT *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        regexp_replace(lower(trim(buyer_name)), '[^a-z0-9]', '', 'g'),
+                        regexp_replace(lower(trim(title)), '[^a-z0-9]', '', 'g'),
+                        COALESCE(CAST(value_amount AS VARCHAR), 'na'),
+                        regexp_replace(lower(trim(COALESCE(supplier_name, ''))), '[^a-z0-9]', '', 'g')
+                    ORDER BY
+                        (CASE WHEN value_amount IS NOT NULL THEN 0 ELSE 1 END),
+                        published_date DESC NULLS LAST,
+                        source
+                ) AS _rn
+            FROM procurement_notices
+            WHERE ai_relevant = TRUE
+        ) WHERE _rn = 1
+    """)
+
     conn.execute("""
         CREATE OR REPLACE VIEW v_reporting_gap AS
         WITH procurement_canonical AS (
             SELECT oa.canonical_name, pn.notice_id
-            FROM procurement_notices pn
+            FROM v_procurement_dedup pn
             JOIN org_aliases oa
                 ON lower(trim(pn.buyer_name)) = lower(trim(oa.raw_name))
-            WHERE pn.ai_relevant = TRUE
         ),
         atrs_canonical AS (
             SELECT oa.canonical_name, ar.record_id
@@ -233,10 +262,9 @@ def _init_gold_views(conn: duckdb.DuckDBPyConnection) -> None:
             SUM(pn.value_amount)                   AS total_value,
             pn.currency,
             COUNT(*)                               AS notice_count
-        FROM procurement_notices pn
+        FROM v_procurement_dedup pn
         JOIN org_aliases oa
             ON lower(trim(pn.buyer_name)) = lower(trim(oa.raw_name))
-        WHERE pn.ai_relevant = TRUE
         GROUP BY oa.canonical_name, month, pn.currency
         ORDER BY month DESC, total_value DESC
     """)
