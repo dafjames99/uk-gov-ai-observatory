@@ -243,6 +243,35 @@ def _extract_documents(release: dict) -> list[dict[str, str | None]]:
     return docs
 
 
+def _contract_status(release: dict) -> str:
+    """Derive a plain-English lifecycle status for a contracting process.
+
+    Maps the OCDS tender.status and awards[].status onto the states a reader
+    cares about:
+      awarded  — a supplier has been awarded (money committed). Value is the
+                 awarded value, or for a framework the shared ceiling.
+      open     — out to tender now; not yet awarded. Value is the estimated max.
+      planned  — future pipeline, pre-tender.
+      closed   — tender complete but no award captured (unsuccessful, or the
+                 award is not disclosed in this notice).
+      cancelled/unsuccessful/withdrawn — as stated by the publisher.
+      unknown  — status not determinable.
+    """
+    awards = release.get("awards") or []
+    if any(a.get("suppliers") and a.get("status") in (None, "active") for a in awards):
+        return "awarded"
+    tender_status = (release.get("tender") or {}).get("status")
+    if tender_status in ("active",):
+        return "open"
+    if tender_status in ("planning", "planned"):
+        return "planned"
+    if tender_status in ("cancelled", "unsuccessful", "withdrawn"):
+        return tender_status
+    if tender_status in ("complete",):
+        return "closed"
+    return "unknown"
+
+
 def _extract_framework_id(release: dict) -> str | None:
     """Return the framework identifier if this notice is a call-off.
 
@@ -323,6 +352,8 @@ def parse_release(
     awards = release.get("awards") or []
     framework_id = _extract_framework_id(release)
     procurement_method = tender.get("procurementMethod")
+    tender_status = tender.get("status")
+    contract_status = _contract_status(release)
 
     tags = release.get("tag", [])
     stage = tags[0] if tags else release.get("stage")
@@ -335,6 +366,8 @@ def parse_release(
         "notice_id": f"{ocid}::{release_id}",
         "source": source.name,
         "stage": stage,
+        "tender_status": tender_status,
+        "contract_status": contract_status,
         "title": _force_utf8(title),
         "description": _force_utf8(description),
         "value_amount": value_amount,

@@ -18,6 +18,18 @@ GOLD_DIR = Path(__file__).parent.parent / "data" / "gold"
 BLUE = "#1d70b8"
 ORANGE = "#f47738"
 
+# Plain-English labels for the OCDS-derived contract lifecycle status.
+STATUS_LABELS = {
+    "awarded": "Awarded",
+    "open": "Out to tender",
+    "planned": "Planned",
+    "closed": "Closed (no award)",
+    "cancelled": "Cancelled",
+    "withdrawn": "Withdrawn",
+    "unsuccessful": "Unsuccessful",
+    "unknown": "Unknown",
+}
+
 
 def _suppliers(awards_json: str | None, fallback: str | None) -> str:
     """Summarise a notice's suppliers from its awards[] array.
@@ -169,12 +181,13 @@ pledged = zones["investment_gbp"].sum() if not zones.empty else 0
 m6.metric("Growth Zone £ pledged", f"£{pledged/1e9:.1f}bn" if pledged else "—")
 
 if not proc.empty:
+    awarded_val = proc.loc[proc["contract_status"] == "awarded", "value_amount"].sum()
     st.caption(
-        f"Contracts are de-duplicated across stages, dates and both procurement sources "
-        f"(Contracts Finder + Find a Tender). Total AI-flagged contract value is "
-        f"**~£{spend/1e9:.0f}bn**, but that sums notice values and is inflated by framework ceiling "
-        f"figures (multi-billion ICT frameworks that merely mention AI) — treat it as an upper bound, "
-        f"not actual AI outlay. The **median** contract above is the reliable central figure."
+        f"Contracts are de-duplicated across stages, dates and both sources (Contracts Finder + "
+        f"Find a Tender). Of these, **£{awarded_val/1e9:.1f}bn has actually been awarded**; the rest "
+        f"are open tenders or planned pipeline (estimated maximums, not committed spend). See the "
+        f"**USE** tab for the awarded / out-to-tender / planned breakdown and what each row means. "
+        f"Framework values are shared ceilings, so even awarded totals are an upper bound."
     )
 
 st.divider()
@@ -194,25 +207,63 @@ with lens_use:
     if proc.empty:
         st.info("No procurement data loaded. Run the backfill and `scripts/export_gold.py`.")
     else:
-        by_source = proc["source"].value_counts().to_dict()
+        proc = proc.copy()
+        proc["status_label"] = proc["contract_status"].map(STATUS_LABELS).fillna("Unknown")
+        awarded = proc[proc["contract_status"] == "awarded"]
+
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("Awarded", f"{len(awarded):,}", help="A supplier has been selected — money committed")
+        b2.metric("Out to tender", f"{(proc['contract_status'] == 'open').sum():,}", help="Open for bids now; not yet awarded")
+        b3.metric("Planned", f"{(proc['contract_status'] == 'planned').sum():,}", help="Future opportunity, before tendering")
+        aw_val = awarded["value_amount"].sum()
+        b4.metric("Awarded value", f"£{aw_val/1e9:.1f}bn", help="Sum of awarded values (frameworks are shared ceilings)")
+
+        with st.expander("ℹ️ How to read this — what a row means"):
+            st.markdown(
+                """
+Each row is a **contracting process** (de-duplicated across the multiple notices that
+describe it). Its **status** tells you what the value means:
+
+- **Awarded** — a supplier (see *Supplier(s)*) has won the contract; the value is the
+  **awarded amount**. For a *framework* (e.g. an IT reseller or imaging framework) that
+  value is a **ceiling shared across all listed suppliers**, not a per-supplier figure.
+- **Out to tender** — currently open for bids; **not yet awarded**. The value is the
+  buyer's **estimated maximum** budget, and the supplier is unknown because none has been
+  chosen yet.
+- **Planned** — a future opportunity flagged before tendering; the value is an early estimate.
+- **Closed / Cancelled / Withdrawn / Unsuccessful** — the process ended without a recorded award.
+
+So an **Awarded** row reads *"£X went to [supplier] for [title]"*, while an **Out to tender**
+row reads *"[buyer] is seeking [title] for up to ~£X"*. Because these mean different things,
+totals that mix them are not "money spent" — the **Awarded value** metric above is the closest
+figure to actual AI outlay.
+                """
+            )
+
+        present_statuses = [s for s in STATUS_LABELS.values() if s in set(proc["status_label"])]
+        chosen = st.multiselect(
+            "Filter by contract status",
+            options=present_statuses,
+            default=[],
+            help="Leave empty to show all. Pick 'Awarded' to see only committed spend.",
+        )
+        view = proc if not chosen else proc[proc["status_label"].isin(chosen)]
+
+        by_source = view["source"].value_counts().to_dict()
         st.caption(
-            f"{len(proc):,} notices · "
-            f"Contracts Finder: {by_source.get('contracts_finder', 0):,} · "
+            f"{len(view):,} contracts · Contracts Finder: {by_source.get('contracts_finder', 0):,} · "
             f"Find a Tender: {by_source.get('find_a_tender', 0):,}"
         )
 
         monthly = (
-            proc.dropna(subset=["published_date"])
+            view.dropna(subset=["published_date"])
             .assign(month=lambda d: d["published_date"].dt.to_period("M").dt.to_timestamp())
             .groupby(["month", "source"])
             .agg(value=("value_amount", "sum"), notices=("notice_id", "count"))
             .reset_index()
         )
         fig = px.bar(
-            monthly,
-            x="month",
-            y="value",
-            color="source",
+            monthly, x="month", y="value", color="source",
             title="AI-flagged contract value by month",
             labels={"month": "", "value": "£ value", "source": ""},
             color_discrete_map={"contracts_finder": BLUE, "find_a_tender": ORANGE},
@@ -221,18 +272,14 @@ with lens_use:
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("**Largest AI-flagged contracts**")
-        st.caption(
-            "Values are the contract/framework total. For frameworks (e.g. IT reseller, "
-            "imaging) that total is a ceiling shared across all listed suppliers, not a per-supplier figure."
-        )
-        top = proc.nlargest(20, "value_amount")[
-            ["buyer_name", "title", "value_amount", "supplier_name", "awards", "source", "ai_confidence", "published_date", "source_url"]
+        top = view.nlargest(20, "value_amount")[
+            ["buyer_name", "title", "value_amount", "status_label", "supplier_name", "awards", "source", "published_date", "source_url"]
         ].copy()
         top["suppliers"] = top.apply(lambda r: _suppliers(r["awards"], r["supplier_name"]), axis=1)
         top["value_amount"] = top["value_amount"].apply(lambda x: f"£{x:,.0f}" if pd.notna(x) else "—")
         top["published_date"] = top["published_date"].dt.strftime("%Y-%m-%d")
-        top = top[["buyer_name", "title", "value_amount", "suppliers", "source", "ai_confidence", "published_date", "source_url"]]
-        top.columns = ["Buyer", "Title", "Value", "Supplier(s)", "Source", "Confidence", "Published", "Link"]
+        top = top[["buyer_name", "title", "value_amount", "status_label", "suppliers", "source", "published_date", "source_url"]]
+        top.columns = ["Buyer", "Title", "Value", "Status", "Supplier(s)", "Source", "Published", "Link"]
         st.dataframe(
             top,
             use_container_width=True,

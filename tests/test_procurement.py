@@ -149,6 +149,24 @@ def test_parse_with_find_a_tender_source():
     assert cf["source_url"].endswith("/Notice/ocds-b5fd17-test-001")
 
 
+def test_contract_status_derivation():
+    from src.ingest.procurement import _contract_status
+
+    awarded = {"awards": [{"status": "active", "suppliers": [{"name": "X"}]}]}
+    assert _contract_status(awarded) == "awarded"
+    assert _contract_status({"tender": {"status": "active"}}) == "open"
+    assert _contract_status({"tender": {"status": "planning"}}) == "planned"
+    assert _contract_status({"tender": {"status": "complete"}}) == "closed"
+    assert _contract_status({"tender": {"status": "cancelled"}}) == "cancelled"
+    assert _contract_status({}) == "unknown"
+    # An award with no supplier is not yet an award.
+    assert _contract_status({"awards": [{"status": "active"}], "tender": {"status": "active"}}) == "open"
+
+
+def test_parse_award_release_status():
+    assert parse_release(_AWARD_RELEASE)["contract_status"] == "awarded"
+
+
 def test_parse_non_ai_notice():
     n = parse_release(_TENDER_NO_AWARD)
     assert n is not None

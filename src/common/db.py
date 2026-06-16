@@ -165,6 +165,8 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("awards", "JSON"),
         ("framework_id", "VARCHAR"),
         ("procurement_method", "VARCHAR"),
+        ("tender_status", "VARCHAR"),
+        ("contract_status", "VARCHAR"),
         ("ai_confidence", "VARCHAR"),
         ("notice_summary", "VARCHAR"),
         ("enrichment_version", "VARCHAR"),
