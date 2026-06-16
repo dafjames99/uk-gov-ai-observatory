@@ -40,14 +40,14 @@ logger = logging.getLogger(__name__)
 
 BRONZE_ROOT = Path(__file__).parents[1] / "data" / "bronze"
 DEFAULT_FROM_YEAR = 2021  # FTS launch — consistent two-feed denominator (design §10.1)
-SOURCES = ("contracts_finder", "find_a_tender")
+SOURCE_NAMES = ("contracts_finder", "find_a_tender")  # SOURCES (the dict) is imported
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Backfill procurement notices from bulk OCDS archives.")
     p.add_argument(
         "--source",
-        choices=(*SOURCES, "both"),
+        choices=(*SOURCE_NAMES, "both"),
         default="both",
         help="Procurement source to backfill. Default: both.",
     )
@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _sources(arg: str) -> tuple[str, ...]:
-    return SOURCES if arg == "both" else (arg,)
+    return SOURCE_NAMES if arg == "both" else (arg,)
 
 
 def main() -> int:
