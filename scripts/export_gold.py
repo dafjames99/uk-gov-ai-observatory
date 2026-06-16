@@ -25,10 +25,18 @@ def main() -> int:
     conn = get_connection()
 
     exports = {
+        # Axis A — usage
         "atrs_records.parquet": "SELECT * FROM atrs_records",
         "procurement_notices.parquet": "SELECT * FROM procurement_notices WHERE ai_relevant = TRUE",
         "v_reporting_gap.parquet": "SELECT * FROM v_reporting_gap",
         "v_spend_by_month.parquet": "SELECT * FROM v_spend_by_month",
+        # Axis B — intent & capacity
+        "gov_announcements.parquet": "SELECT * FROM gov_announcements WHERE ai_relevant = TRUE",
+        "written_questions.parquet": "SELECT * FROM written_questions WHERE ai_relevance_flag = TRUE",
+        "ai_growth_zones.parquet": "SELECT * FROM ai_growth_zones",
+        "v_announcement_trends.parquet": "SELECT * FROM v_announcement_trends",
+        "v_wpq_trends.parquet": "SELECT * FROM v_wpq_trends",
+        "v_capacity_overview.parquet": "SELECT * FROM v_capacity_overview",
     }
 
     for filename, query in exports.items():

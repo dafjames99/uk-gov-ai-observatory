@@ -241,17 +241,48 @@ def _init_gold_views(conn: duckdb.DuckDBPyConnection) -> None:
         ORDER BY month DESC, total_value DESC
     """)
 
-    # Phase 2 view — safe to create now as written_questions table exists
+    # WPQ scrutiny trends (Axis B). The Questions & Statements API already
+    # returns a clean answering-body name, so group on it directly rather than
+    # depending on org_aliases coverage.
     conn.execute("""
         CREATE OR REPLACE VIEW v_wpq_trends AS
         SELECT
-            oa.canonical_name,
-            date_trunc('month', wq.date_tabled) AS month,
-            COUNT(*)                            AS question_count
-        FROM written_questions wq
-        JOIN org_aliases oa
-            ON lower(trim(wq.department)) = lower(trim(oa.raw_name))
-        WHERE wq.ai_relevance_flag = TRUE
-        GROUP BY oa.canonical_name, month
+            department,
+            date_trunc('month', date_tabled) AS month,
+            COUNT(*)                          AS question_count
+        FROM written_questions
+        WHERE ai_relevance_flag = TRUE
+        GROUP BY department, month
         ORDER BY month DESC, question_count DESC
+    """)
+
+    # Announcement (intent) trends — AI announcements by month and document type.
+    conn.execute("""
+        CREATE OR REPLACE VIEW v_announcement_trends AS
+        SELECT
+            date_trunc('month', public_timestamp) AS month,
+            document_type,
+            COUNT(*)                              AS announcement_count
+        FROM gov_announcements
+        WHERE ai_relevant = TRUE
+        GROUP BY month, document_type
+        ORDER BY month DESC, announcement_count DESC
+    """)
+
+    # Capacity overview — the curated AI Growth Zones register, ordered by
+    # announcement date for the Capacity lens.
+    conn.execute("""
+        CREATE OR REPLACE VIEW v_capacity_overview AS
+        SELECT
+            zone_id,
+            zone_name,
+            region,
+            status,
+            investment_gbp,
+            compute_capacity,
+            announced_date,
+            lead_org,
+            source_url
+        FROM ai_growth_zones
+        ORDER BY announced_date
     """)

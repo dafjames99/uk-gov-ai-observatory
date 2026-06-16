@@ -101,7 +101,13 @@ def test_gold_views_exist(conn):
             "SELECT table_name FROM information_schema.views WHERE table_schema = 'main'"
         ).fetchall()
     }
-    assert {"v_reporting_gap", "v_spend_by_month", "v_wpq_trends"} <= views
+    assert {
+        "v_reporting_gap",
+        "v_spend_by_month",
+        "v_wpq_trends",
+        "v_announcement_trends",
+        "v_capacity_overview",
+    } <= views
 
 
 def test_org_aliases_seed(conn):
