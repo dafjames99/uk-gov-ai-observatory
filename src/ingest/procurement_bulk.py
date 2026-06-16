@@ -25,7 +25,7 @@ from typing import Any, Iterator
 import duckdb
 
 from src.common.http import RateLimitedSession
-from src.ingest.procurement import parse_release, upsert_notices
+from src.ingest.procurement import SOURCES, Source, parse_release, upsert_notices
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +170,7 @@ def iter_releases_from_jsonl(path: Path) -> Iterator[dict]:
 def load_archive(
     path: Path,
     conn: duckdb.DuckDBPyConnection,
+    source: Source = SOURCES["contracts_finder"],
     ai_relevant_only: bool = True,
     batch_size: int = _DEFAULT_BATCH_SIZE,
 ) -> int:
@@ -182,6 +183,8 @@ def load_archive(
     Args:
         path: Path to the .jsonl / .jsonl.gz archive.
         conn: An open DuckDB connection.
+        source: The procurement source the archive belongs to (sets `source`
+            and the public notice URL on each row).
         ai_relevant_only: If True, persist only AI-relevant notices.
         batch_size: Number of parsed notices to accumulate before each upsert.
 
@@ -193,7 +196,7 @@ def load_archive(
 
     for release in iter_releases_from_jsonl(path):
         try:
-            notice = parse_release(release)
+            notice = parse_release(release, source)
         except Exception:
             errors += 1
             logger.debug("Failed to parse release %s", release.get("ocid"), exc_info=True)

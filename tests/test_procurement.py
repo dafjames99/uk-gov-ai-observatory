@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from src.common.db import get_connection, init_schema
-from src.ingest.procurement import parse_release, upsert_notices
+from src.ingest.procurement import (
+    CONTRACTS_FINDER,
+    FIND_A_TENDER,
+    parse_release,
+    upsert_notices,
+)
 
 # ---------------------------------------------------------------------------
 # Minimal OCDS release fixture
@@ -129,6 +134,18 @@ def test_parse_extracts_v2_fields():
     # Full awards array retained.
     awards = json.loads(n["awards"])
     assert len(awards) == 1 and awards[0]["id"] == "award-1"
+
+
+def test_parse_with_find_a_tender_source():
+    n = parse_release(_AWARD_RELEASE, FIND_A_TENDER)
+    assert n["source"] == "find_a_tender"
+    assert n["source_url"] == (
+        "https://www.find-tender.service.gov.uk/Notice/ocds-b5fd17-test-001-award-1"
+    )
+    # CF remains the default and uses the ocid in its notice URL.
+    cf = parse_release(_AWARD_RELEASE, CONTRACTS_FINDER)
+    assert cf["source"] == "contracts_finder"
+    assert cf["source_url"].endswith("/Notice/ocds-b5fd17-test-001")
 
 
 def test_parse_non_ai_notice():

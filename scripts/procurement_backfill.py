@@ -28,6 +28,7 @@ from pathlib import Path
 
 from src.common.db import get_connection, init_schema
 from src.common.http import build_session
+from src.ingest.procurement import SOURCES
 from src.ingest.procurement_bulk import download_archive, load_archive
 
 logging.basicConfig(
@@ -111,7 +112,9 @@ def main() -> int:
         if args.dry_run:
             logger.info("Dry run — would load %s", args.archive)
             return 0
-        total_inserted += load_archive(args.archive, conn, ai_relevant_only)
+        total_inserted += load_archive(
+            args.archive, conn, SOURCES[args.source], ai_relevant_only
+        )
         logger.info("Backfill complete. Inserted %d new notices.", total_inserted)
         conn.close()
         return 0
@@ -131,7 +134,7 @@ def main() -> int:
                 logger.info("Dry run — downloaded but not loading %s", archive.name)
                 continue
 
-            total_inserted += load_archive(archive, conn, ai_relevant_only)
+            total_inserted += load_archive(archive, conn, SOURCES[source], ai_relevant_only)
 
     if conn is not None:
         silver_total = conn.execute("SELECT COUNT(*) FROM procurement_notices").fetchone()[0]
