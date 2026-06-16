@@ -111,29 +111,35 @@ def test_gold_views_exist(conn):
     } <= views
 
 
-def test_procurement_dedup_collapses_cross_source_duplicate(conn):
-    """The same contract on CF and FTS (different notice_id/ocid) collapses to one."""
+def test_procurement_dedup_collapses_framework_across_stage_and_source(conn):
+    """The same framework across tender/award stages and CF/FTS collapses to one
+    row, keyed on buyer + value + title (not supplier), keeping the richest row."""
+    full = "Digital Dictation and Speech Recognition Transcription Framework Agreement"
+    truncated = "Digital Dictation and Speech Recognition Transcription Fra"  # FTS-style cut
     rows = [
-        # Same buyer + title + value + supplier, published twice across sources.
-        ("ocds-b5fd17-aaa::r1", "contracts_finder", "AI Platform", 500000.0, "DWP", "TechCorp", "2024-01-10"),
-        ("ocds-h6vhtk-bbb::r1", "find_a_tender", "AI Platform", 500000.0, "DWP", "TechCorp", "2024-02-15"),
-        # A genuinely different contract (same buyer/title, different supplier) must survive.
-        ("ocds-b5fd17-ccc::r1", "contracts_finder", "AI Platform", 500000.0, "DWP", "OtherCo", "2024-01-10"),
+        # Tender stage on CF — no award/supplier yet.
+        ("ocds-b5fd17-aaa::r1", "contracts_finder", full, 600000000.0,
+         "EEM", "supplier_unknown", None, "2022-08-15"),
+        # Award stage on CF — supplier list present (awards): the richest row.
+        ("ocds-b5fd17-bbb::r1", "contracts_finder", full, 600000000.0,
+         "EEM", "Currys Group Ltd", '[{"suppliers":[{"name":"Currys Group Ltd"}]}]', "2022-11-16"),
+        # Same framework on FTS, title truncated past 50 chars.
+        ("ocds-h6vhtk-ccc::r1", "find_a_tender", truncated, 600000000.0,
+         "EEM", "Currys Group Ltd", None, "2022-11-16"),
     ]
-    for nid, src, title, val, buyer, sup, pub in rows:
+    for nid, src, title, val, buyer, sup, awards, pub in rows:
         conn.execute(
             "INSERT INTO procurement_notices (notice_id, source, title, value_amount, "
-            "buyer_name, supplier_name, published_date, ai_relevant, ai_confidence, ai_relevance_version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, 'strong', '2.0')",
-            [nid, src, title, val, buyer, sup, pub],
+            "buyer_name, supplier_name, awards, published_date, ai_relevant, ai_confidence, ai_relevance_version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, 'strong', '2.0')",
+            [nid, src, title, val, buyer, sup, awards, pub],
         )
 
-    deduped = conn.execute("SELECT notice_id, source FROM v_procurement_dedup ORDER BY supplier_name").fetchall()
-    # TechCorp duplicate collapses to one (the most recent — FTS); OtherCo survives.
-    assert len(deduped) == 2
-    techcorp = [r for r in deduped if r[0].startswith("ocds-h6vhtk") or r[0].startswith("ocds-b5fd17-aaa")]
-    assert len(techcorp) == 1
-    assert techcorp[0][1] == "find_a_tender"  # most recent published_date won
+    deduped = conn.execute("SELECT notice_id FROM v_procurement_dedup").fetchall()
+    # All three are the same £600m framework → one row, and it's the award row
+    # (awards present) so the supplier detail is retained.
+    assert len(deduped) == 1
+    assert deduped[0][0] == "ocds-b5fd17-bbb::r1"
 
 
 def test_org_aliases_seed(conn):

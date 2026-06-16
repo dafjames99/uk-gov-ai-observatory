@@ -5,6 +5,7 @@ INTENT — what it plans and is scrutinised on (announcements + WPQs).
 CAPACITY — the economic/physical expansion (AI Growth Zones).
 """
 
+import json
 from glob import glob
 from pathlib import Path
 
@@ -16,6 +17,28 @@ GOLD_DIR = Path(__file__).parent.parent / "data" / "gold"
 
 BLUE = "#1d70b8"
 ORANGE = "#f47738"
+
+
+def _suppliers(awards_json: str | None, fallback: str | None) -> str:
+    """Summarise a notice's suppliers from its awards[] array.
+
+    Frameworks list every appointed supplier inside one notice's awards; the
+    headline value is the shared framework ceiling, not a per-supplier figure.
+    Shown as 'First Supplier +N'.
+    """
+    names: list[str] = []
+    if awards_json and not pd.isna(awards_json):
+        try:
+            for award in json.loads(awards_json):
+                for s in award.get("suppliers") or []:
+                    if s.get("name"):
+                        names.append(s["name"])
+        except (ValueError, TypeError):
+            pass
+    names = list(dict.fromkeys(names))  # de-dupe, keep order
+    if not names:
+        return fallback if fallback and fallback != "supplier_unknown" else "—"
+    return names[0] + (f"  +{len(names) - 1}" if len(names) > 1 else "")
 
 st.set_page_config(
     page_title="UK Gov AI Observatory",
@@ -198,12 +221,18 @@ with lens_use:
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("**Largest AI-flagged contracts**")
+        st.caption(
+            "Values are the contract/framework total. For frameworks (e.g. IT reseller, "
+            "imaging) that total is a ceiling shared across all listed suppliers, not a per-supplier figure."
+        )
         top = proc.nlargest(20, "value_amount")[
-            ["buyer_name", "title", "value_amount", "source", "ai_confidence", "published_date", "source_url"]
+            ["buyer_name", "title", "value_amount", "supplier_name", "awards", "source", "ai_confidence", "published_date", "source_url"]
         ].copy()
+        top["suppliers"] = top.apply(lambda r: _suppliers(r["awards"], r["supplier_name"]), axis=1)
         top["value_amount"] = top["value_amount"].apply(lambda x: f"£{x:,.0f}" if pd.notna(x) else "—")
         top["published_date"] = top["published_date"].dt.strftime("%Y-%m-%d")
-        top.columns = ["Buyer", "Title", "Value", "Source", "Confidence", "Published", "Link"]
+        top = top[["buyer_name", "title", "value_amount", "suppliers", "source", "ai_confidence", "published_date", "source_url"]]
+        top.columns = ["Buyer", "Title", "Value", "Supplier(s)", "Source", "Confidence", "Published", "Link"]
         st.dataframe(
             top,
             use_container_width=True,

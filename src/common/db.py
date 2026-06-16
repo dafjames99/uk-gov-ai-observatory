@@ -199,16 +199,25 @@ def _init_gold_views(conn: duckdb.DuckDBPyConnection) -> None:
     Args:
         conn: An open DuckDB connection.
     """
-    # Canonical de-duplicated procurement. The same contract is often published
-    # more than once — across stages, across publication dates, and across both
-    # Contracts Finder and Find a Tender (which use different ocid namespaces, so
-    # there is no shared key). Collapse on buyer + title + value + supplier;
-    # including supplier avoids merging distinct awards on a shared framework.
-    # Buyer/title/supplier are normalised to alphanumerics only, so spacing and
-    # punctuation variants collapse too (e.g. "COMIT4 - ICT Solutions" vs
-    # "ComIT 4 - ICT Solutions"). Keep one representative per contract: prefer a
-    # row that carries a value, then the most recent publication. This is the
-    # analytical source of truth — the spend/gap views and Gold export read it.
+    # Canonical de-duplicated procurement. The same contract is published many
+    # times — across stages (tender vs award), across publication dates, and
+    # across both Contracts Finder and Find a Tender (different ocid namespaces,
+    # so no shared key). Collapse on buyer + value + title.
+    #
+    # Key design notes:
+    #   - NO supplier in the key. For frameworks the value is the shared ceiling
+    #     and the suppliers live inside one notice's awards[] array; the same
+    #     framework appears as separate notices only because of stage/source, not
+    #     because of distinct suppliers. Keying on supplier wrongly kept the
+    #     tender stage (supplier_unknown) apart from the award stage, double-
+    #     counting the framework value.
+    #   - Title is normalised to alphanumerics and truncated to 50 chars, so
+    #     spacing/punctuation variants ("COMIT4" vs "ComIT 4") and Find a Tender's
+    #     title truncation both collapse.
+    #   - Representative = the richest row: prefer one with awards (the full
+    #     supplier list), then a named supplier, then a value, then most recent.
+    # This is the analytical source of truth — spend/gap views and the Gold
+    # export all read it.
     conn.execute(r"""
         CREATE OR REPLACE VIEW v_procurement_dedup AS
         SELECT * EXCLUDE (_rn) FROM (
@@ -216,10 +225,12 @@ def _init_gold_views(conn: duckdb.DuckDBPyConnection) -> None:
                 ROW_NUMBER() OVER (
                     PARTITION BY
                         regexp_replace(lower(trim(buyer_name)), '[^a-z0-9]', '', 'g'),
-                        regexp_replace(lower(trim(title)), '[^a-z0-9]', '', 'g'),
                         COALESCE(CAST(value_amount AS VARCHAR), 'na'),
-                        regexp_replace(lower(trim(COALESCE(supplier_name, ''))), '[^a-z0-9]', '', 'g')
+                        LEFT(regexp_replace(lower(trim(title)), '[^a-z0-9]', '', 'g'), 50)
                     ORDER BY
+                        (CASE WHEN awards IS NOT NULL THEN 0 ELSE 1 END),
+                        (CASE WHEN supplier_name IS NOT NULL
+                              AND supplier_name <> 'supplier_unknown' THEN 0 ELSE 1 END),
                         (CASE WHEN value_amount IS NOT NULL THEN 0 ELSE 1 END),
                         published_date DESC NULLS LAST,
                         source
