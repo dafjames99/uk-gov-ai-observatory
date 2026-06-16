@@ -82,6 +82,10 @@ def download_archive(
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{source}_{year or 'full'}.jsonl.gz"
 
+    if dest.exists() and dest.stat().st_size > 0:
+        logger.info("Using cached archive %s (%d bytes)", dest.name, dest.stat().st_size)
+        return dest
+
     logger.info("Downloading %s → %s", url, dest)
     resp = session.get(url, stream=True)
     with open(dest, "wb") as f:

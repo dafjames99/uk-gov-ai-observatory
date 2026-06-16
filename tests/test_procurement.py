@@ -140,13 +140,14 @@ def test_parse_extracts_v2_fields():
 def test_parse_with_find_a_tender_source():
     n = parse_release(_AWARD_RELEASE, FIND_A_TENDER)
     assert n["source"] == "find_a_tender"
-    assert n["source_url"] == (
-        "https://www.find-tender.service.gov.uk/Notice/ocds-b5fd17-test-001-award-1"
-    )
-    # CF remains the default and uses the ocid in its notice URL.
+    # The fixture has no Find a Tender notice document → link is unresolvable.
+    assert n["source_url"] is None
+    assert n["link_status"] == "unresolved"
+    # CF constructs from the bare GUID (ocds-b5fd17- stripped).
     cf = parse_release(_AWARD_RELEASE, CONTRACTS_FINDER)
     assert cf["source"] == "contracts_finder"
-    assert cf["source_url"].endswith("/Notice/ocds-b5fd17-test-001")
+    assert cf["source_url"] == "https://www.contractsfinder.service.gov.uk/Notice/test-001"
+    assert cf["link_status"] == "ok"
 
 
 def test_contract_status_derivation():
@@ -165,6 +166,24 @@ def test_contract_status_derivation():
 
 def test_parse_award_release_status():
     assert parse_release(_AWARD_RELEASE)["contract_status"] == "awarded"
+
+
+def test_notice_url_resolution():
+    from src.ingest.procurement import CONTRACTS_FINDER, FIND_A_TENDER, _notice_url
+
+    cf_docs = [{"documentType": "awardNotice", "url": "https://www.contractsfinder.service.gov.uk/Notice/abc-123"}]
+    assert _notice_url(cf_docs, "ocds-b5fd17-abc-123", CONTRACTS_FINDER) == (
+        "https://www.contractsfinder.service.gov.uk/Notice/abc-123", "ok",
+    )
+    # CF with no document → construct from the bare GUID (strip ocds-b5fd17-).
+    assert _notice_url([], "ocds-b5fd17-xyz-789", CONTRACTS_FINDER) == (
+        "https://www.contractsfinder.service.gov.uk/Notice/xyz-789", "ok",
+    )
+    # FTS uses the document URL when present.
+    fts_docs = [{"documentType": "tenderNotice", "url": "https://www.find-tender.service.gov.uk/Notice/056365-2025"}]
+    assert _notice_url(fts_docs, "ocds-h6vhtk-04ec11", FIND_A_TENDER)[0].endswith("/Notice/056365-2025")
+    # FTS with no document → unresolvable (notice number not in the record).
+    assert _notice_url([], "ocds-h6vhtk-04ec11", FIND_A_TENDER) == (None, "unresolved")
 
 
 def test_parse_non_ai_notice():

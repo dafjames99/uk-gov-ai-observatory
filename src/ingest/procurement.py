@@ -32,7 +32,6 @@ class Source:
     from_param: str
     to_param: str
     size_param: str
-    notice_url_template: str
     default_stages: str | None  # None → omit the param (source returns all stages)
 
 
@@ -42,7 +41,6 @@ CONTRACTS_FINDER = Source(
     from_param="publishedFrom",
     to_param="publishedTo",
     size_param="size",
-    notice_url_template="https://www.contractsfinder.service.gov.uk/Notice/{ocid}",
     default_stages="award,planning,tender,contract",
 )
 
@@ -52,7 +50,6 @@ FIND_A_TENDER = Source(
     from_param="updatedFrom",
     to_param="updatedTo",
     size_param="limit",
-    notice_url_template="https://www.find-tender.service.gov.uk/Notice/{release_id}",
     # FTS rejects a comma-separated stages list (returns nothing); omit it and
     # take all stages rather than making one request per stage.
     default_stages=None,
@@ -272,6 +269,35 @@ def _contract_status(release: dict) -> str:
     return "unknown"
 
 
+def _notice_url(documents: list[dict], ocid: str, source: "Source") -> tuple[str | None, str]:
+    """Resolve the canonical public notice URL and a link_status.
+
+    The reliable source is the OCDS document whose URL points at the notice
+    web page (the publisher's own link). Contracts Finder notice URLs use the
+    bare GUID — NOT the full ocid (the ocds-b5fd17- prefix must be stripped).
+    Find a Tender's human notice number (e.g. 056365-2025) exists only in the
+    document URL, so a notice with no documents cannot be linked.
+
+    Returns:
+        (url, link_status) where link_status is 'ok' or 'unresolved'.
+    """
+    domain = "contractsfinder.service.gov.uk" if source.name == "contracts_finder" else "find-tender.service.gov.uk"
+    notice_docs = [d for d in documents if d.get("url") and domain in d["url"]]
+    for doc_type in ("tenderNotice", "awardNotice", "contractNotice"):
+        for d in notice_docs:
+            if d.get("documentType") == doc_type:
+                return d["url"], "ok"
+    if notice_docs:
+        return notice_docs[0]["url"], "ok"
+
+    # No notice document: Contracts Finder can be constructed from the GUID;
+    # Find a Tender cannot (the notice number is not in the bulk record).
+    if source.name == "contracts_finder" and ocid:
+        guid = ocid.split("ocds-b5fd17-")[-1]
+        return f"https://www.contractsfinder.service.gov.uk/Notice/{guid}", "ok"
+    return None, "unresolved"
+
+
 def _extract_framework_id(release: dict) -> str | None:
     """Return the framework identifier if this notice is a call-off.
 
@@ -354,6 +380,7 @@ def parse_release(
     procurement_method = tender.get("procurementMethod")
     tender_status = tender.get("status")
     contract_status = _contract_status(release)
+    source_url, link_status = _notice_url(documents, ocid, source)
 
     tags = release.get("tag", [])
     stage = tags[0] if tags else release.get("stage")
@@ -387,8 +414,8 @@ def parse_release(
         "ai_relevant": ai_rel,
         "ai_confidence": ai_confidence,
         "ai_relevance_version": rel_version,
-        "link_status": "ok",
-        "source_url": source.notice_url_template.format(ocid=ocid, release_id=release_id),
+        "link_status": link_status,
+        "source_url": source_url,
         "ingested_at": datetime.now(timezone.utc).isoformat(),
     }
 
