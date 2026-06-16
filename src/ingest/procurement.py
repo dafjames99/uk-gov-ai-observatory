@@ -156,6 +156,54 @@ def _extract_supplier(release: dict) -> tuple[str, str | None]:
     return "supplier_unknown", None
 
 
+def _extract_documents(release: dict) -> list[dict[str, str | None]]:
+    """Collect document links from the tender and any awards.
+
+    OCDS documents carry the real detail behind thin notice descriptions
+    (tender packs, specifications, award letters). Deduplicated on URL.
+
+    Returns:
+        List of {title, url, documentType} dicts.
+    """
+    docs: list[dict[str, str | None]] = []
+    seen: set[str] = set()
+
+    def _add(d: dict) -> None:
+        url = d.get("url")
+        if not url or url in seen:
+            return
+        seen.add(url)
+        docs.append(
+            {
+                "title": d.get("title") or d.get("description"),
+                "url": url,
+                "documentType": d.get("documentType"),
+            }
+        )
+
+    for d in release.get("tender", {}).get("documents", []) or []:
+        _add(d)
+    for award in release.get("awards", []) or []:
+        for d in award.get("documents", []) or []:
+            _add(d)
+    return docs
+
+
+def _extract_framework_id(release: dict) -> str | None:
+    """Return the framework identifier if this notice is a call-off.
+
+    CF/FTS OCDS does not populate tender.techniques reliably; the framework
+    link lives in relatedProcesses with a 'framework' relationship.
+    """
+    for rp in release.get("relatedProcesses", []) or []:
+        rel = rp.get("relationship") or []
+        if isinstance(rel, str):
+            rel = [rel]
+        if any("framework" in str(r).lower() for r in rel):
+            return rp.get("identifier") or rp.get("id")
+    return None
+
+
 def _extract_dates(release: dict) -> tuple[str | None, str | None, str | None]:
     """Return (published_date, contract_start, contract_end) as ISO date strings."""
     published = release.get("date") or release.get("publishedDate")
@@ -213,6 +261,10 @@ def parse_release(release: dict) -> dict[str, Any] | None:
     value_amount, currency = _extract_value(release)
     supplier_name, supplier_id = _extract_supplier(release)
     published_date, contract_start, contract_end = _extract_dates(release)
+    documents = _extract_documents(release)
+    awards = release.get("awards") or []
+    framework_id = _extract_framework_id(release)
+    procurement_method = tender.get("procurementMethod")
 
     tags = release.get("tag", [])
     stage = tags[0] if tags else release.get("stage")
@@ -233,6 +285,10 @@ def parse_release(release: dict) -> dict[str, Any] | None:
         "supplier_name": supplier_name,
         "supplier_id": supplier_id,
         "cpv_codes": json.dumps(cpv_codes),
+        "documents": json.dumps(documents) if documents else None,
+        "awards": json.dumps(awards) if awards else None,
+        "framework_id": framework_id,
+        "procurement_method": procurement_method,
         "published_date": published_date,
         "contract_start": contract_start,
         "contract_end": contract_end,
