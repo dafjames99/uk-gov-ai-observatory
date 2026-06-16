@@ -98,7 +98,99 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         )
     """)
 
+    # v2 — Axis B (intent & capacity)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS gov_announcements (
+            announcement_id      VARCHAR PRIMARY KEY,
+            title                VARCHAR,
+            document_type        VARCHAR,
+            organisations        JSON,
+            public_timestamp     TIMESTAMPTZ,
+            updated_timestamp    TIMESTAMPTZ,
+            summary              VARCHAR,
+            body_excerpt         VARCHAR,
+            ai_relevant          BOOLEAN,
+            ai_confidence        VARCHAR,
+            ai_relevance_version VARCHAR,
+            topic_tags           JSON,
+            enrichment_version   VARCHAR,
+            source_url           VARCHAR,
+            ingested_at          TIMESTAMPTZ
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_growth_zones (
+            zone_id          VARCHAR PRIMARY KEY,
+            zone_name        VARCHAR,
+            site             VARCHAR,
+            region           VARCHAR,
+            status           VARCHAR,
+            investment_gbp   DOUBLE,
+            compute_capacity VARCHAR,
+            announced_date   DATE,
+            lead_org         VARCHAR,
+            source_url       VARCHAR,
+            notes            VARCHAR
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS datacentre_planning (
+            application_id   VARCHAR PRIMARY KEY,
+            site_name        VARCHAR,
+            local_authority  VARCHAR,
+            description      VARCHAR,
+            status           VARCHAR,
+            decision_date    DATE,
+            latitude         DOUBLE,
+            longitude        DOUBLE,
+            dc_relevant      BOOLEAN,
+            source_url       VARCHAR,
+            ingested_at      TIMESTAMPTZ
+        )
+    """)
+
+    migrate(conn)
     _init_gold_views(conn)
+
+
+# Additive column migrations. Keyed by table; each entry is (column, type).
+# DuckDB's CREATE TABLE IF NOT EXISTS never alters an existing table, so columns
+# added after a table first shipped are applied here with ADD COLUMN IF NOT EXISTS.
+# Idempotent — safe to run on a fresh DB or an existing one.
+_COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
+    "procurement_notices": [
+        ("documents", "JSON"),
+        ("awards", "JSON"),
+        ("framework_id", "VARCHAR"),
+        ("procurement_method", "VARCHAR"),
+        ("ai_confidence", "VARCHAR"),
+        ("notice_summary", "VARCHAR"),
+        ("enrichment_version", "VARCHAR"),
+    ],
+    "written_questions": [
+        ("enrichment_version", "VARCHAR"),
+    ],
+}
+
+
+def migrate(conn: duckdb.DuckDBPyConnection) -> None:
+    """Apply additive column migrations to existing Silver tables.
+
+    Adds any columns introduced after a table first shipped, using
+    ADD COLUMN IF NOT EXISTS so it is idempotent on both fresh and existing
+    databases. New tables belong in init_schema(); only column additions to
+    already-shipped tables belong here.
+
+    Args:
+        conn: An open DuckDB connection.
+    """
+    for table, columns in _COLUMN_MIGRATIONS.items():
+        for name, col_type in columns:
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {col_type}"
+            )
 
 
 def _init_gold_views(conn: duckdb.DuckDBPyConnection) -> None:

@@ -293,8 +293,13 @@ def upsert_notices(
         logger.info("No new notices to insert (all %d already present)", len(df))
         return 0
 
+    # Insert by explicit column names (not positional SELECT *) so that columns
+    # present in the table but not emitted by parse_release default to NULL.
+    cols = ", ".join(new_df.columns)
     conn.register("_notices_tmp", new_df)
-    conn.execute("INSERT INTO procurement_notices SELECT * FROM _notices_tmp")
+    conn.execute(
+        f"INSERT INTO procurement_notices ({cols}) SELECT {cols} FROM _notices_tmp"
+    )
     conn.unregister("_notices_tmp")
 
     logger.info("Inserted %d new notices into Silver", len(new_df))

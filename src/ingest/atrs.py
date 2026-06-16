@@ -273,8 +273,11 @@ def upsert_records(
         logger.info("No new ATRS records to insert (all %d already present)", len(df))
         return 0
 
+    # Insert by explicit column names (not positional SELECT *) so the insert
+    # stays correct if the table gains columns the parser doesn't emit.
+    cols = ", ".join(new_df.columns)
     conn.register("_atrs_tmp", new_df)
-    conn.execute("INSERT INTO atrs_records SELECT * FROM _atrs_tmp")
+    conn.execute(f"INSERT INTO atrs_records ({cols}) SELECT {cols} FROM _atrs_tmp")
     conn.unregister("_atrs_tmp")
 
     logger.info("Inserted %d new ATRS records into Silver", len(new_df))
