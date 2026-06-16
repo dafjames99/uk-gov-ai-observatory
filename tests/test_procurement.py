@@ -118,6 +118,7 @@ def test_parse_award_release():
     assert n["contract_start"] == "2025-04-15"
     assert n["contract_end"] == "2026-04-14"
     assert n["ai_relevant"] is True
+    assert n["ai_confidence"] == "strong"  # "machine learning" is a strong keyword
     assert n["link_status"] == "ok"
 
 

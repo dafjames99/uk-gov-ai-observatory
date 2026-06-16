@@ -1,35 +1,47 @@
-# AI-relevance classification config
+# AI-relevance classification config (v2 — tiered/scored)
+#
 # Version this file. Store ai_relevance_version alongside each flagged record
-# so that tightening or loosening the definition doesn't silently shift historical stats.
-version: "1.0"
+# so that tightening or loosening the definition doesn't silently shift
+# historical stats. v1 was a single binary keyword+CPV match, which flagged most
+# government IT as "AI"; v2 scores into strong / weak / none so the dashboard can
+# default to high-precision (strong) and offer weak behind a toggle.
+version: "2.0"
 
-# Keyword matching is case-insensitive and applied to title + description fields.
-# Start narrow — expand deliberately after spot-checking near-misses.
-keywords:
+# Keyword matching is case-insensitive, applied to (title + description).
+
+# Strong: on their own, sufficient to classify a notice as 'strong'.
+strong_keywords:
   - artificial intelligence
   - machine learning
   - deep learning
   - neural network
   - large language model
-  - generative ai
   - llm
+  - generative ai
   - natural language processing
-  - nlp
   - computer vision
   - automated decision
-  - predictive analytics
-  - predictive model
+  - foundation model
+
+# Weak: soft signals. Alone → 'weak'. Combined with a strong CPV code → 'strong'.
+weak_keywords:
   - algorithm
   - algorithmic
+  - predictive
+  - automation
+  - data science
+  - chatbot
+  - optimisation model
 
-# CPV code matching — a notice is flagged if any of its cpv_codes match.
-# Format: a prefix string; any CPV code starting with this value is matched.
-# 72xxxxxx = IT services broadly; 48xxxxxx = software packages.
-# These are deliberately broad; narrow via the keywords filter for relevance.
-cpv_code_prefixes:
-  - "7221"   # Programming services
+# CPV code matching — a prefix; any of a notice's cpv_codes starting with it
+# matches. There is no dedicated AI code in the CPV 2008 vocabulary, so CPV is
+# never sufficient alone for 'strong' — only the narrower strong set elevates a
+# weak keyword to strong.
+strong_cpv_prefixes:
   - "7222"   # Systems and technical consultancy
   - "7223"   # Data processing services
+weak_cpv_prefixes:
+  - "7221"   # Programming services
   - "7224"   # Database services
   - "7226"   # Computer-related services
   - "7231"   # Computer programming services
@@ -39,8 +51,7 @@ cpv_code_prefixes:
   - "4816"   # Exchange software packages
   - "4817"   # Office software packages
 
-# A procurement notice is AI-relevant if:
-#   (any keyword matches title OR description)
-#   OR (any cpv_code_prefix matches any of cpv_codes)
-# Both conditions are OR'd — either is sufficient.
-match_logic: any
+# Scoring (implemented in src/ingest/ai_relevance.classify):
+#   strong : any strong_keyword  OR  (any weak_keyword AND any strong_cpv)
+#   weak   : any weak_keyword     OR  any strong_cpv  OR  any weak_cpv
+#   none   : otherwise

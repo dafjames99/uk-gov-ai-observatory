@@ -11,7 +11,7 @@ import duckdb
 import pandas as pd
 
 from src.common.http import RateLimitedSession
-from src.ingest.ai_relevance import config_version, is_ai_relevant
+from src.ingest.ai_relevance import classify, config_version
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +327,8 @@ def parse_release(
     tags = release.get("tag", [])
     stage = tags[0] if tags else release.get("stage")
 
-    ai_rel = is_ai_relevant(title, description, cpv_codes)
+    ai_confidence = classify(title, description, cpv_codes)
+    ai_rel = ai_confidence != "none"
     rel_version = config_version()
 
     return {
@@ -351,6 +352,7 @@ def parse_release(
         "contract_start": contract_start,
         "contract_end": contract_end,
         "ai_relevant": ai_rel,
+        "ai_confidence": ai_confidence,
         "ai_relevance_version": rel_version,
         "link_status": "ok",
         "source_url": source.notice_url_template.format(ocid=ocid, release_id=release_id),
