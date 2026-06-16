@@ -1,6 +1,7 @@
 """Load the AI-relevance config and classify procurement notices."""
 
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -41,8 +42,23 @@ def config_version(path: Path | None = None) -> str:
     return load_config(path).get("version", "unknown")
 
 
+@lru_cache(maxsize=8)
+def _compile_keywords(keywords: tuple[str, ...]) -> re.Pattern | None:
+    """Compile keywords into one word-boundary alternation regex.
+
+    Word boundaries prevent short tokens from matching inside other words
+    (e.g. 'ai' in 'maintain', 'llm' in 'fulfillment'), which plain substring
+    matching would wrongly flag.
+    """
+    if not keywords:
+        return None
+    alternation = "|".join(re.escape(k) for k in keywords)
+    return re.compile(rf"\b(?:{alternation})\b", re.IGNORECASE)
+
+
 def _any_keyword(text: str, keywords: list[str]) -> bool:
-    return any(k.lower() in text for k in keywords)
+    pattern = _compile_keywords(tuple(keywords))
+    return bool(pattern and pattern.search(text))
 
 
 def _any_cpv(cpv_codes: list[str] | None, prefixes: list[str]) -> bool:

@@ -7,11 +7,16 @@
 # default to high-precision (strong) and offer weak behind a toggle.
 version: "2.0"
 
-# Keyword matching is case-insensitive, applied to (title + description).
+# Keyword matching is case-insensitive and word-boundary aware (so 'ai' does
+# not match 'maintain', 'llm' does not match 'fulfillment'), applied to
+# (title + description).
 
-# Strong: on their own, sufficient to classify a notice as 'strong'.
+# Strong: on their own, sufficient to classify a notice as 'strong'. Includes
+# the concrete AI techniques and product terms that actually appear in notices,
+# not just the textbook headline phrases.
 strong_keywords:
   - artificial intelligence
+  - ai
   - machine learning
   - deep learning
   - neural network
@@ -19,9 +24,24 @@ strong_keywords:
   - llm
   - generative ai
   - natural language processing
+  - nlp
   - computer vision
+  - machine vision
   - automated decision
   - foundation model
+  - predictive analytics
+  - chatbot
+  - conversational ai
+  - recommendation engine
+  - recommender system
+  - intelligent automation
+  - robotic process automation
+  - facial recognition
+  - image recognition
+  - speech recognition
+  - sentiment analysis
+  - anomaly detection
+  - optical character recognition
 
 # Weak: soft signals. Alone → 'weak'. Combined with a strong CPV code → 'strong'.
 weak_keywords:
@@ -30,8 +50,9 @@ weak_keywords:
   - predictive
   - automation
   - data science
-  - chatbot
+  - data analytics
   - optimisation model
+  - decision support
 
 # CPV code matching — a prefix; any of a notice's cpv_codes starting with it
 # matches. There is no dedicated AI code in the CPV 2008 vocabulary, so CPV is

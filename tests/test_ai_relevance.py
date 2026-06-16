@@ -4,11 +4,24 @@ from src.ingest.ai_relevance import classify, config_version, is_ai_relevant
 
 _CFG = {
     "version": "test-2.0",
-    "strong_keywords": ["artificial intelligence", "machine learning"],
+    "strong_keywords": ["artificial intelligence", "machine learning", "ai", "llm"],
     "weak_keywords": ["algorithm", "automation"],
     "strong_cpv_prefixes": ["7222", "7223"],
     "weak_cpv_prefixes": ["7221", "4800"],
 }
+
+
+# ── word-boundary matching ──────────────────────────────────────────────────
+
+
+def test_short_token_does_not_match_inside_words():
+    # 'ai' must not match 'maintain'/'Thai'; 'llm' must not match 'fulfillment'.
+    assert classify("Maintain Thai fulfillment centre", None, None, config=_CFG) == "none"
+
+
+def test_short_token_matches_as_whole_word():
+    assert classify("AI-powered triage", None, None, config=_CFG) == "strong"
+    assert classify("New LLM service", None, None, config=_CFG) == "strong"
 
 
 # ── strong ─────────────────────────────────────────────────────────────────
